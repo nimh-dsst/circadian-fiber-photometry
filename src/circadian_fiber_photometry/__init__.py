@@ -32,6 +32,10 @@ from .synthetic_doric import (
     SyntheticDoricConfig,
     SyntheticDoricSummary,
     SyntheticSignalConfig,
+    SyntheticTTLBehaviorCodeConfig,
+    SyntheticTTLBehaviorEventConfig,
+    SyntheticTTLBehaviorEventSummary,
+    SyntheticTTLRandomBehaviorEventConfig,
     generate_synthetic_doric,
 )
 
@@ -46,6 +50,10 @@ __all__ = [
     "SyntheticDoricConfig",
     "SyntheticDoricSummary",
     "SyntheticSignalConfig",
+    "SyntheticTTLBehaviorCodeConfig",
+    "SyntheticTTLBehaviorEventConfig",
+    "SyntheticTTLBehaviorEventSummary",
+    "SyntheticTTLRandomBehaviorEventConfig",
     "TimestampGapReport",
     "analyze_sessions",
     "analyze_stream_pair",

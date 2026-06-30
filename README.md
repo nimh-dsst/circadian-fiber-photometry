@@ -68,6 +68,8 @@ mirror the Doric FPConsole hierarchy used by the legacy MATLAB readers:
 ```python
 from circadian_fiber_photometry import (
     SyntheticDoricConfig,
+    SyntheticTTLBehaviorCodeConfig,
+    SyntheticTTLBehaviorEventConfig,
     generate_synthetic_doric,
 )
 
@@ -80,15 +82,30 @@ summary = generate_synthetic_doric(
         fs=60,
         channel_count=2,
         seed=123,
+        ttl_behavior_codes=(
+            SyntheticTTLBehaviorCodeConfig("lick", channel=1, pulse_count=1),
+            SyntheticTTLBehaviorCodeConfig("entry", channel=1, pulse_count=2),
+            SyntheticTTLBehaviorCodeConfig("reward", channel=1, pulse_count=3),
+        ),
+        ttl_behavior_events=(
+            SyntheticTTLBehaviorEventConfig("lick", start_seconds=(5.0,)),
+            SyntheticTTLBehaviorEventConfig("entry", start_seconds=(15.0,)),
+            SyntheticTTLBehaviorEventConfig("reward", start_seconds=(25.0,)),
+        ),
     ),
 )
 
 print(summary.event_sample_indices)
+print(summary.ttl_pulse_sample_indices)
+print(summary.ttl_behavior_events)
 ```
 
 The generator writes Doric-like configuration metadata and per-series lock-in,
 analog input, analog output, and digital IO groups. It does not attempt to
-guarantee Doric Neuroscience Studio GUI import compatibility.
+guarantee Doric Neuroscience Studio GUI import compatibility. Digital IO TTL
+pulse timing is relative to the start of each series. Behavior codes are encoded
+by pulse count; by default each pulse is 50 ms high with a 50 ms low gap, so
+within-sequence rising edges are 100 ms apart.
 
 ## Stream dictionaries
 

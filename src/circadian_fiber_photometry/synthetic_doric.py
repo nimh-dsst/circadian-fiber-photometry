@@ -29,6 +29,51 @@ class SyntheticSignalConfig:
 
 
 @dataclass(frozen=True)
+class SyntheticTTLBehaviorCodeConfig:
+    """Behavior event code encoded by a DigitalIO pulse count."""
+
+    name: str
+    channel: int
+    pulse_count: int
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class SyntheticTTLBehaviorEventConfig:
+    """Explicit behavior-code sequence starts for synthetic DigitalIO."""
+
+    code_name: str
+    start_seconds: tuple[float, ...]
+    series_numbers: tuple[int, ...] | None = None
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class SyntheticTTLRandomBehaviorEventConfig:
+    """Seeded random behavior-code sequence generation."""
+
+    code_name: str
+    event_count_per_series: int
+    start_window_seconds: tuple[float, float] | None = None
+    series_numbers: tuple[int, ...] | None = None
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class SyntheticTTLBehaviorEventSummary:
+    """Ground-truth summary for one behavior-code TTL sequence."""
+
+    code_name: str
+    channel: int
+    pulse_count: int
+    series_number: int
+    sequence_start_sample: int
+    sequence_start_seconds: float
+    pulse_sample_indices: np.ndarray
+    pulse_times_seconds: np.ndarray
+
+
+@dataclass(frozen=True)
 class SyntheticDoricConfig:
     """Configuration for generating a synthetic Doric HDF5 file."""
 
@@ -44,6 +89,11 @@ class SyntheticDoricConfig:
     created: str | None = None
     filename_metadata: str | None = None
     signal: SyntheticSignalConfig = field(default_factory=SyntheticSignalConfig)
+    ttl_behavior_codes: tuple[SyntheticTTLBehaviorCodeConfig, ...] = ()
+    ttl_behavior_events: tuple[SyntheticTTLBehaviorEventConfig, ...] = ()
+    ttl_random_behavior_events: tuple[SyntheticTTLRandomBehaviorEventConfig, ...] = ()
+    ttl_pulse_width_seconds: float = 0.050
+    ttl_pulse_off_interval_seconds: float = 0.050
 
 
 @dataclass(frozen=True)
@@ -63,6 +113,9 @@ class SyntheticDoricSummary:
     session_start_times: np.ndarray
     event_sample_indices: dict[tuple[int, int], np.ndarray]
     event_times_seconds: dict[tuple[int, int], np.ndarray]
+    ttl_pulse_sample_indices: dict[tuple[int, int], np.ndarray]
+    ttl_pulse_times_seconds: dict[tuple[int, int], np.ndarray]
+    ttl_behavior_events: tuple[SyntheticTTLBehaviorEventSummary, ...]
 
 
 def generate_synthetic_doric(
@@ -98,6 +151,7 @@ def generate_synthetic_doric(
         ],
         dtype=float,
     )
+    ttl_schedule = _build_ttl_schedule(config, validated, session_start_times)
     event_sample_indices: dict[tuple[int, int], np.ndarray] = {}
     event_times_seconds: dict[tuple[int, int], np.ndarray] = {}
 
@@ -175,7 +229,12 @@ def generate_synthetic_doric(
                 _create_signal_dataset(
                     digital_io,
                     dio_name,
-                    np.zeros(validated.samples_per_series, dtype=float),
+                    _ttl_values_for_key(
+                        ttl_schedule,
+                        series_index + 1,
+                        dio_number,
+                        validated.samples_per_series,
+                    ),
                     _signal_attrs(dio_name, -0.1, 1.1, "ON/OFF"),
                 )
 
@@ -189,6 +248,9 @@ def generate_synthetic_doric(
         session_start_times=session_start_times,
         event_sample_indices=event_sample_indices,
         event_times_seconds=event_times_seconds,
+        ttl_pulse_sample_indices=ttl_schedule.pulse_sample_indices,
+        ttl_pulse_times_seconds=ttl_schedule.pulse_times_seconds,
+        ttl_behavior_events=ttl_schedule.behavior_events,
     )
 
 
@@ -198,6 +260,14 @@ class _GeneratedChannel:
     calcium_465: np.ndarray
     analog_in: np.ndarray
     event_indices: np.ndarray
+
+
+@dataclass(frozen=True)
+class _TTLSchedule:
+    intervals_by_key: dict[tuple[int, int], tuple[tuple[int, int], ...]]
+    pulse_sample_indices: dict[tuple[int, int], np.ndarray]
+    pulse_times_seconds: dict[tuple[int, int], np.ndarray]
+    behavior_events: tuple[SyntheticTTLBehaviorEventSummary, ...]
 
 
 @dataclass(frozen=True)
@@ -217,6 +287,14 @@ class _ValidatedConfig:
         )
         _require_positive_number(config.fs, "fs")
         _require_positive_int(config.decimation_factor, "decimation_factor")
+        _require_positive_number(
+            config.ttl_pulse_width_seconds,
+            "ttl_pulse_width_seconds",
+        )
+        _require_nonnegative_number(
+            config.ttl_pulse_off_interval_seconds,
+            "ttl_pulse_off_interval_seconds",
+        )
 
         configured_series_count = (
             config.series_count
@@ -247,6 +325,299 @@ class _ValidatedConfig:
             samples_per_series=samples_per_series,
             crop_samples=crop_samples,
         )
+
+
+def _build_ttl_schedule(
+    config: SyntheticDoricConfig,
+    validated: _ValidatedConfig,
+    session_start_times: np.ndarray,
+) -> _TTLSchedule:
+    intervals_by_key: dict[tuple[int, int], list[tuple[int, int]]] = {
+        (series_number, dio_channel): []
+        for series_number in range(1, config.series_count + 1)
+        for dio_channel in (1, 2)
+    }
+    behavior_events: list[SyntheticTTLBehaviorEventSummary] = []
+    all_codes = _validate_ttl_behavior_codes(config)
+    width_samples = _positive_seconds_to_samples(
+        config.ttl_pulse_width_seconds,
+        config.fs,
+        "ttl_pulse_width_seconds",
+    )
+    off_samples = _nonnegative_seconds_to_samples(
+        config.ttl_pulse_off_interval_seconds,
+        config.fs,
+        "ttl_pulse_off_interval_seconds",
+    )
+
+    for event_config in config.ttl_behavior_events:
+        if not event_config.enabled:
+            continue
+        code = _ttl_code_for_schedule(event_config.code_name, all_codes)
+        if code is None:
+            continue
+        _validate_ttl_behavior_event(event_config, config)
+
+        for series_number in _resolve_ttl_series_numbers(
+            event_config.series_numbers,
+            config.series_count,
+        ):
+            for sequence_start_seconds in event_config.start_seconds:
+                sequence_start_sample = _nonnegative_seconds_to_samples(
+                    sequence_start_seconds,
+                    config.fs,
+                    "start_seconds",
+                )
+                _add_ttl_behavior_sequence(
+                    code,
+                    series_number,
+                    sequence_start_sample,
+                    config,
+                    validated,
+                    session_start_times,
+                    width_samples,
+                    off_samples,
+                    intervals_by_key,
+                    behavior_events,
+                )
+
+    ttl_rng = np.random.default_rng(
+        np.random.SeedSequence([int(config.seed), 0x54544C])
+    )
+    for random_config in config.ttl_random_behavior_events:
+        if not random_config.enabled:
+            continue
+        code = _ttl_code_for_schedule(random_config.code_name, all_codes)
+        if code is None:
+            continue
+        _validate_ttl_random_behavior_event(random_config, config)
+
+        sequence_duration = _ttl_sequence_duration_samples(
+            code.pulse_count,
+            width_samples,
+            off_samples,
+        )
+        window_start_sample, window_stop_sample = _random_window_samples(
+            random_config.start_window_seconds,
+            config,
+            validated,
+        )
+
+        for series_number in _resolve_ttl_series_numbers(
+            random_config.series_numbers,
+            config.series_count,
+        ):
+            _add_random_ttl_behavior_sequences(
+                ttl_rng,
+                random_config,
+                code,
+                series_number,
+                window_start_sample,
+                window_stop_sample,
+                sequence_duration,
+                config,
+                validated,
+                session_start_times,
+                width_samples,
+                off_samples,
+                intervals_by_key,
+                behavior_events,
+            )
+
+    return _freeze_ttl_schedule(
+        config,
+        session_start_times,
+        intervals_by_key,
+        behavior_events,
+    )
+
+
+def _add_ttl_behavior_sequence(
+    code: SyntheticTTLBehaviorCodeConfig,
+    series_number: int,
+    sequence_start_sample: int,
+    config: SyntheticDoricConfig,
+    validated: _ValidatedConfig,
+    session_start_times: np.ndarray,
+    width_samples: int,
+    off_samples: int,
+    intervals_by_key: dict[tuple[int, int], list[tuple[int, int]]],
+    behavior_events: list[SyntheticTTLBehaviorEventSummary],
+) -> None:
+    sequence_duration = _ttl_sequence_duration_samples(
+        code.pulse_count,
+        width_samples,
+        off_samples,
+    )
+    if (
+        sequence_start_sample < 0
+        or sequence_start_sample + sequence_duration > validated.samples_per_series
+    ):
+        raise ValueError(
+            "TTL behavior sequence starts outside the session or extends beyond it"
+        )
+
+    pulse_starts = np.array(
+        [
+            sequence_start_sample
+            + pulse_index * (width_samples + off_samples)
+            for pulse_index in range(code.pulse_count)
+        ],
+        dtype=int,
+    )
+    intervals = tuple(
+        (int(start_sample), int(start_sample + width_samples))
+        for start_sample in pulse_starts
+    )
+    key = (series_number, code.channel)
+    if _ttl_sequence_overlaps(intervals, intervals_by_key[key]):
+        raise ValueError(
+            f"TTL behavior sequences overlap for series {series_number} "
+            f"DIO{code.channel:02d}"
+        )
+
+    intervals_by_key[key].extend(intervals)
+    sequence_start_seconds = (
+        session_start_times[series_number - 1] + sequence_start_sample / config.fs
+    )
+    pulse_times_seconds = session_start_times[series_number - 1] + (
+        pulse_starts / config.fs
+    )
+    behavior_events.append(
+        SyntheticTTLBehaviorEventSummary(
+            code_name=code.name,
+            channel=code.channel,
+            pulse_count=code.pulse_count,
+            series_number=series_number,
+            sequence_start_sample=sequence_start_sample,
+            sequence_start_seconds=float(sequence_start_seconds),
+            pulse_sample_indices=pulse_starts,
+            pulse_times_seconds=pulse_times_seconds,
+        )
+    )
+
+
+def _add_random_ttl_behavior_sequences(
+    rng: np.random.Generator,
+    random_config: SyntheticTTLRandomBehaviorEventConfig,
+    code: SyntheticTTLBehaviorCodeConfig,
+    series_number: int,
+    window_start_sample: int,
+    window_stop_sample: int,
+    sequence_duration: int,
+    config: SyntheticDoricConfig,
+    validated: _ValidatedConfig,
+    session_start_times: np.ndarray,
+    width_samples: int,
+    off_samples: int,
+    intervals_by_key: dict[tuple[int, int], list[tuple[int, int]]],
+    behavior_events: list[SyntheticTTLBehaviorEventSummary],
+) -> None:
+    if random_config.event_count_per_series == 0:
+        return
+
+    latest_start = window_stop_sample - sequence_duration
+    if latest_start < window_start_sample:
+        raise ValueError("TTL random behavior event window is too short")
+
+    accepted = 0
+    candidates = rng.permutation(np.arange(window_start_sample, latest_start + 1))
+    for candidate in candidates:
+        intervals = _ttl_sequence_intervals(
+            int(candidate),
+            code.pulse_count,
+            width_samples,
+            off_samples,
+        )
+        if _ttl_sequence_overlaps(
+            intervals,
+            intervals_by_key[(series_number, code.channel)],
+        ):
+            continue
+        _add_ttl_behavior_sequence(
+            code,
+            series_number,
+            int(candidate),
+            config,
+            validated,
+            session_start_times,
+            width_samples,
+            off_samples,
+            intervals_by_key,
+            behavior_events,
+        )
+        accepted += 1
+        if accepted >= random_config.event_count_per_series:
+            return
+
+    raise ValueError(
+        "could not place requested non-overlapping TTL random behavior events"
+    )
+
+
+def _freeze_ttl_schedule(
+    config: SyntheticDoricConfig,
+    session_start_times: np.ndarray,
+    intervals_by_key: dict[tuple[int, int], list[tuple[int, int]]],
+    behavior_events: list[SyntheticTTLBehaviorEventSummary],
+) -> _TTLSchedule:
+    frozen_intervals: dict[tuple[int, int], tuple[tuple[int, int], ...]] = {}
+    pulse_sample_indices: dict[tuple[int, int], np.ndarray] = {}
+    pulse_times_seconds: dict[tuple[int, int], np.ndarray] = {}
+
+    for key, intervals in intervals_by_key.items():
+        series_number, dio_channel = key
+        sorted_intervals = tuple(sorted(intervals))
+        previous_stop = -1
+        for start_sample, stop_sample in sorted_intervals:
+            if start_sample < previous_stop:
+                raise ValueError(
+                    "TTL behavior sequences overlap for "
+                    f"series {series_number} DIO{dio_channel:02d}"
+                )
+            previous_stop = stop_sample
+
+        starts = np.array(
+            [start_sample for start_sample, _ in sorted_intervals],
+            dtype=int,
+        )
+        frozen_intervals[key] = sorted_intervals
+        pulse_sample_indices[key] = starts
+        pulse_times_seconds[key] = session_start_times[series_number - 1] + (
+            starts / config.fs
+        )
+
+    sorted_behavior_events = tuple(
+        sorted(
+            behavior_events,
+            key=lambda event: (
+                event.series_number,
+                event.channel,
+                event.sequence_start_sample,
+                event.code_name,
+            ),
+        )
+    )
+    return _TTLSchedule(
+        intervals_by_key=frozen_intervals,
+        pulse_sample_indices=pulse_sample_indices,
+        pulse_times_seconds=pulse_times_seconds,
+        behavior_events=sorted_behavior_events,
+    )
+
+
+def _ttl_values_for_key(
+    schedule: _TTLSchedule,
+    series_number: int,
+    dio_channel: int,
+    samples: int,
+) -> np.ndarray:
+    values = np.zeros(samples, dtype=float)
+    for start_sample, stop_sample in schedule.intervals_by_key[
+        (series_number, dio_channel)
+    ]:
+        values[start_sample:stop_sample] = 1.0
+    return values
 
 
 def _generate_channel_signals(
@@ -402,7 +773,7 @@ def _write_configuration_groups(
     for output_number in (1, 2):
         _write_analog_output_config(fpconsole, output_number)
     for dio_number in (1, 2):
-        _write_digital_io_config(fpconsole, dio_number)
+        _write_digital_io_config(fpconsole, dio_number, config)
 
     _create_group(fpconsole, "GlobalSettings").attrs.update(
         {
@@ -588,7 +959,62 @@ def _write_analog_output_config(fpconsole: h5py.Group, output_number: int) -> No
     )
 
 
-def _write_digital_io_config(fpconsole: h5py.Group, dio_number: int) -> None:
+def _first_ttl_code_for_channel(
+    config: SyntheticDoricConfig,
+    dio_number: int,
+) -> SyntheticTTLBehaviorCodeConfig | None:
+    for code in config.ttl_behavior_codes:
+        if code.enabled and code.channel == dio_number:
+            return code
+    return None
+
+
+def _digital_io_modulation_attrs(
+    code: SyntheticTTLBehaviorCodeConfig | None,
+    config: SyntheticDoricConfig,
+) -> dict[str, int | float | np.ndarray]:
+    time_on = 50.0
+    period = 100.0
+    frequency = 10.0
+    duty_cycle = 50.0
+    if code is not None:
+        time_on = config.ttl_pulse_width_seconds * 1000
+        period = (
+            config.ttl_pulse_width_seconds + config.ttl_pulse_off_interval_seconds
+        ) * 1000
+        frequency = 1000 / period
+        duty_cycle = 100 * time_on / period
+
+    return {
+        "DelayBetweenSequence": 0,
+        "DutyCycle": duty_cycle,
+        "FallingTime": 0,
+        "Frequency": frequency,
+        "Inverted": 0,
+        "ModulationType": 3,
+        "NumberOfPulsesPerSequence": 0,
+        "NumberOfSequence": 1,
+        "NumberOfSteps": 2,
+        "Period": period,
+        "Phase": 0,
+        "RisingTime": 0,
+        "Smoothed": 0,
+        "StartingDelay": 0,
+        "StepsVoltage": np.array([0.0, 0.0], dtype=float),
+        "TimeON": time_on,
+        "TotalDuration": 0,
+        "UsingFrequency": 1,
+        "UsingTimeON": 1,
+        "VoltageMax": 4.75,
+        "VoltageMin": 0.0,
+    }
+
+
+def _write_digital_io_config(
+    fpconsole: h5py.Group,
+    dio_number: int,
+    config: SyntheticDoricConfig,
+) -> None:
     dio_name = f"DIO{dio_number:02d}"
     dio_group = _create_group(fpconsole, dio_name)
     graphsettings = _create_group(dio_group, "Graphsettings")
@@ -597,29 +1023,10 @@ def _write_digital_io_config(fpconsole: h5py.Group, dio_number: int) -> None:
     )
     modulations = _create_group(dio_group, "Modulations")
     _create_group(modulations, "Modulation1").attrs.update(
-        {
-            "DelayBetweenSequence": 0,
-            "DutyCycle": 50.0,
-            "FallingTime": 0,
-            "Frequency": 10.0,
-            "Inverted": 0,
-            "ModulationType": 3,
-            "NumberOfPulsesPerSequence": 0,
-            "NumberOfSequence": 1,
-            "NumberOfSteps": 2,
-            "Period": 100.0,
-            "Phase": 0,
-            "RisingTime": 0,
-            "Smoothed": 0,
-            "StartingDelay": 0,
-            "StepsVoltage": np.array([0.0, 0.0], dtype=float),
-            "TimeON": 50.0,
-            "TotalDuration": 0,
-            "UsingFrequency": 1,
-            "UsingTimeON": 1,
-            "VoltageMax": 4.75,
-            "VoltageMin": 0.0,
-        }
+        _digital_io_modulation_attrs(
+            _first_ttl_code_for_channel(config, dio_number),
+            config,
+        )
     )
     _create_group(dio_group, "Settings").attrs.update(
         {
@@ -704,6 +1111,11 @@ def _require_positive_int(value: int, name: str) -> None:
         raise ValueError(f"{name} must be a positive integer")
 
 
+def _require_nonnegative_int(value: int, name: str) -> None:
+    if not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a nonnegative integer")
+
+
 def _require_positive_number(value: float, name: str) -> None:
     if not np.isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be positive")
@@ -712,6 +1124,19 @@ def _require_positive_number(value: float, name: str) -> None:
 def _require_nonnegative_number(value: float, name: str) -> None:
     if not np.isfinite(value) or value < 0:
         raise ValueError(f"{name} must be nonnegative")
+
+
+def _positive_seconds_to_samples(value: float, fs: float, name: str) -> int:
+    _require_positive_number(value, name)
+    samples = int(round(value * fs))
+    if samples < 1:
+        raise ValueError(f"{name} must round to at least 1 sample")
+    return samples
+
+
+def _nonnegative_seconds_to_samples(value: float, fs: float, name: str) -> int:
+    _require_nonnegative_number(value, name)
+    return int(round(value * fs))
 
 
 def _validate_signal_config(signal: SyntheticSignalConfig) -> None:
@@ -731,3 +1156,145 @@ def _validate_signal_config(signal: SyntheticSignalConfig) -> None:
     _require_nonnegative_number(signal.transient_amplitude, "transient_amplitude")
     _require_positive_number(signal.transient_rise_seconds, "transient_rise_seconds")
     _require_positive_number(signal.transient_decay_seconds, "transient_decay_seconds")
+
+
+def _validate_ttl_behavior_codes(
+    config: SyntheticDoricConfig,
+) -> dict[str, SyntheticTTLBehaviorCodeConfig]:
+    codes: dict[str, SyntheticTTLBehaviorCodeConfig] = {}
+    for code in config.ttl_behavior_codes:
+        if not code.name:
+            raise ValueError("TTL behavior code name must not be empty")
+        if code.name in codes:
+            raise ValueError(f"duplicate TTL behavior code name: {code.name}")
+        _validate_dio_channel(code.channel)
+        _require_positive_int(code.pulse_count, "pulse_count")
+        codes[code.name] = code
+    return codes
+
+
+def _ttl_code_for_schedule(
+    code_name: str,
+    codes: dict[str, SyntheticTTLBehaviorCodeConfig],
+) -> SyntheticTTLBehaviorCodeConfig | None:
+    try:
+        code = codes[code_name]
+    except KeyError as exc:
+        raise ValueError(f"unknown TTL behavior code: {code_name}") from exc
+    if not code.enabled:
+        return None
+    return code
+
+
+def _validate_ttl_behavior_event(
+    event_config: SyntheticTTLBehaviorEventConfig,
+    config: SyntheticDoricConfig,
+) -> None:
+    if len(event_config.start_seconds) == 0:
+        raise ValueError("start_seconds must contain at least one time")
+    for start_seconds in event_config.start_seconds:
+        _require_nonnegative_number(start_seconds, "start_seconds")
+    _resolve_ttl_series_numbers(event_config.series_numbers, config.series_count)
+
+
+def _validate_ttl_random_behavior_event(
+    random_config: SyntheticTTLRandomBehaviorEventConfig,
+    config: SyntheticDoricConfig,
+) -> None:
+    _require_nonnegative_int(
+        random_config.event_count_per_series,
+        "event_count_per_series",
+    )
+    _resolve_ttl_series_numbers(random_config.series_numbers, config.series_count)
+    if random_config.start_window_seconds is not None:
+        if len(random_config.start_window_seconds) != 2:
+            raise ValueError("start_window_seconds must contain two values")
+        start_seconds, stop_seconds = random_config.start_window_seconds
+        _require_nonnegative_number(start_seconds, "start_window_seconds")
+        _require_nonnegative_number(stop_seconds, "start_window_seconds")
+        if stop_seconds < start_seconds:
+            raise ValueError(
+                "start_window_seconds stop must be greater than or equal to start"
+            )
+
+
+def _ttl_sequence_duration_samples(
+    pulse_count: int,
+    width_samples: int,
+    off_samples: int,
+) -> int:
+    return pulse_count * width_samples + (pulse_count - 1) * off_samples
+
+
+def _ttl_sequence_intervals(
+    sequence_start_sample: int,
+    pulse_count: int,
+    width_samples: int,
+    off_samples: int,
+) -> tuple[tuple[int, int], ...]:
+    return tuple(
+        (
+            sequence_start_sample + pulse_index * (width_samples + off_samples),
+            sequence_start_sample
+            + pulse_index * (width_samples + off_samples)
+            + width_samples,
+        )
+        for pulse_index in range(pulse_count)
+    )
+
+
+def _ttl_sequence_overlaps(
+    candidate_intervals: tuple[tuple[int, int], ...],
+    existing_intervals: list[tuple[int, int]],
+) -> bool:
+    return any(
+        candidate_start < existing_stop and existing_start < candidate_stop
+        for candidate_start, candidate_stop in candidate_intervals
+        for existing_start, existing_stop in existing_intervals
+    )
+
+
+def _random_window_samples(
+    start_window_seconds: tuple[float, float] | None,
+    config: SyntheticDoricConfig,
+    validated: _ValidatedConfig,
+) -> tuple[int, int]:
+    if start_window_seconds is None:
+        return 0, validated.samples_per_series
+
+    start_seconds, stop_seconds = start_window_seconds
+    start_sample = _nonnegative_seconds_to_samples(
+        start_seconds,
+        config.fs,
+        "start_window_seconds",
+    )
+    stop_sample = _nonnegative_seconds_to_samples(
+        stop_seconds,
+        config.fs,
+        "start_window_seconds",
+    )
+    return start_sample, min(stop_sample, validated.samples_per_series)
+
+
+def _validate_dio_channel(channel: int) -> None:
+    if not isinstance(channel, int) or channel not in (1, 2):
+        raise ValueError("TTL channel must be 1 or 2")
+
+
+def _resolve_ttl_series_numbers(
+    series_numbers: tuple[int, ...] | None,
+    series_count: int,
+) -> tuple[int, ...]:
+    if series_numbers is None:
+        return tuple(range(1, series_count + 1))
+
+    if len(series_numbers) == 0:
+        raise ValueError("series_numbers must not be empty")
+    if len(set(series_numbers)) != len(series_numbers):
+        raise ValueError("series_numbers must not contain duplicates")
+    for series_number in series_numbers:
+        if not isinstance(series_number, int) or not 1 <= series_number <= series_count:
+            raise ValueError(
+                "series_numbers must contain values between 1 and series_count"
+            )
+    return series_numbers
