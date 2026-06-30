@@ -40,6 +40,13 @@ Session-aware inputs can be either `(samples, sessions)` for one channel or
 `(samples, channels, sessions)` for multi-channel recordings. Returned trace
 arrays are normalized to `(samples, channels, sessions)`.
 
+Pass `fit_weights` to use conventional weighted least squares when fitting the
+405 nm signal to the 465 nm signal. Weights must be nonnegative and match or
+broadcast to the input signal shape; zero-weight samples are ignored. The
+`weight_fit` argument preserves the legacy MATLAB behavior by overwriting the
+first session-length block of the pooled fitting arrays with zeros before
+regression.
+
 The package exposes:
 
 - `fit_405_to_465`

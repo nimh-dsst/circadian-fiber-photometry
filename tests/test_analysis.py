@@ -90,6 +90,69 @@ def test_fit_405_to_465_accepts_multi_channel_sessions() -> None:
     assert result.coefficients.shape == (channels, 2)
 
 
+def test_fit_405_to_465_weight_fit_matches_matlab_zero_block() -> None:
+    samples = 5
+    iso = np.column_stack(
+        [
+            np.linspace(1, 5, samples),
+            np.linspace(2, 6, samples),
+        ]
+    )
+    calcium = 2 * iso + 1
+
+    result = fit_405_to_465(iso, calcium, fs=1, weight_fit=True, smooth_seconds=1)
+
+    flat_405 = np.ravel(iso, order="F").copy()
+    flat_465 = np.ravel(calcium, order="F").copy()
+    fit_mask = (flat_465 > np.percentile(flat_465, 0)) & (
+        flat_465 < np.percentile(flat_465, 100)
+    )
+    flat_405[:samples] = 0
+    flat_465[:samples] = 0
+    expected = np.polyfit(flat_405[fit_mask], flat_465[fit_mask], 1)
+
+    assert result.coefficients[0] == pytest.approx(expected)
+    assert result.coefficients[0] != pytest.approx([2.0, 1.0])
+
+
+def test_fit_405_to_465_uses_conventional_fit_weights() -> None:
+    iso = np.arange(6, dtype=float)
+    calcium = np.array([0, 1, 2, 25, 4, 50], dtype=float)
+    weights = np.ones_like(iso)
+    weights[3] = 1e-6
+
+    unweighted = fit_405_to_465(
+        iso,
+        calcium,
+        fs=1,
+        weight_fit=False,
+        smooth_seconds=1,
+    )
+    weighted = fit_405_to_465(
+        iso,
+        calcium,
+        fs=1,
+        weight_fit=False,
+        fit_weights=weights,
+        smooth_seconds=1,
+    )
+
+    assert abs(weighted.coefficients[0, 0] - 1.0) < abs(
+        unweighted.coefficients[0, 0] - 1.0
+    )
+    assert weighted.coefficients[0] == pytest.approx([1.0, 0.0], abs=1e-4)
+
+
+def test_fit_405_to_465_rejects_negative_fit_weights() -> None:
+    iso = np.arange(6, dtype=float)
+    calcium = iso + 1
+    weights = np.ones_like(iso)
+    weights[2] = -1
+
+    with pytest.raises(ValueError, match="fit_weights must be nonnegative"):
+        fit_405_to_465(iso, calcium, fs=1, fit_weights=weights)
+
+
 def test_irls_dynamic_correction_returns_finite_trace() -> None:
     fs = 20
     t = np.arange(400) / fs

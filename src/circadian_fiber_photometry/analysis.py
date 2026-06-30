@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.linalg import lstsq
 from scipy.signal import butter, filtfilt, find_peaks
 
 from ._utils import (
@@ -30,12 +31,19 @@ def fit_405_to_465(
     fitting_cutoff: float = 0,
     weight_fit: bool = True,
     smooth_seconds: float = 5,
+    fit_weights: np.ndarray | None = None,
 ) -> DffFitResult:
     """Fit 405 nm isosbestic traces onto 465 nm traces and compute dF/F.
 
     Inputs may be 1D traces, ``(samples, sessions)``, or
     ``(samples, channels, sessions)`` arrays. Outputs are always normalized to
     ``(samples, channels, sessions)``.
+
+    ``fit_weights`` supplies conventional weighted least-squares weights for
+    fitting 405 nm to 465 nm. It may match the normalized signal shape or
+    broadcast to it; zero-weight samples are ignored. ``weight_fit`` preserves
+    the legacy MATLAB behavior by overwriting the first session-length block of
+    the pooled fitting arrays with zeros before regression.
     """
 
     if fs <= 0:
@@ -50,6 +58,7 @@ def fit_405_to_465(
     )
     calcium, _ = normalize_session_array(calcium_465, "calcium_465", allow_trace=True)
     require_matching_shapes(iso, calcium)
+    weights = _normalize_fit_weights(fit_weights, iso.shape)
 
     samples, channels, sessions = iso.shape
     fitted_405 = np.empty_like(calcium)
@@ -68,6 +77,10 @@ def fit_405_to_465(
             & np.isfinite(flat_405)
             & np.isfinite(flat_465)
         )
+        flat_weights = None
+        if weights is not None:
+            flat_weights = np.ravel(weights[:, channel, :], order="F")
+            fit_mask &= np.isfinite(flat_weights) & (flat_weights > 0)
 
         if weight_fit and sessions > 1:
             zero_count = min(samples, flat_405.size)
@@ -79,7 +92,12 @@ def fit_405_to_465(
                 "not enough finite, non-extreme points to fit 405 to 465 signal"
             )
 
-        slope, intercept = np.polyfit(flat_405[fit_mask], flat_465[fit_mask], 1)
+        fit_weight_values = None if flat_weights is None else flat_weights[fit_mask]
+        slope, intercept = _weighted_linear_fit(
+            flat_405[fit_mask],
+            flat_465[fit_mask],
+            fit_weight_values,
+        )
         coefficients[channel, :] = [slope, intercept]
 
         for session in range(sessions):
@@ -92,6 +110,55 @@ def fit_405_to_465(
             )
 
     return DffFitResult(dff=dff, fitted_405=fitted_405, coefficients=coefficients)
+
+
+def _normalize_fit_weights(
+    fit_weights: np.ndarray | None,
+    target_shape: tuple[int, int, int],
+) -> np.ndarray | None:
+    """Normalize nonnegative WLS weights to the signal shape."""
+
+    if fit_weights is None:
+        return None
+
+    weights, _ = normalize_session_array(fit_weights, "fit_weights", allow_trace=True)
+    try:
+        weights = np.broadcast_to(weights, target_shape)
+    except ValueError as exc:
+        raise ValueError(
+            "fit_weights must match or broadcast to the normalized signal shape "
+            f"{target_shape}; got {np.asarray(fit_weights).shape}"
+        ) from exc
+
+    if not np.all(np.isfinite(weights)):
+        raise ValueError("fit_weights must be finite")
+    if np.any(weights < 0):
+        raise ValueError("fit_weights must be nonnegative")
+    if not np.any(weights > 0):
+        raise ValueError("fit_weights must contain at least one positive value")
+    return weights
+
+
+def _weighted_linear_fit(
+    x_values: np.ndarray,
+    y_values: np.ndarray,
+    weights: np.ndarray | None = None,
+) -> tuple[float, float]:
+    """Fit y = slope * x + intercept by ordinary or weighted least squares."""
+
+    design = np.column_stack([x_values, np.ones_like(x_values)])
+    response = y_values
+
+    if weights is not None:
+        sqrt_weights = np.sqrt(weights)
+        design = design * sqrt_weights[:, np.newaxis]
+        response = response * sqrt_weights
+
+    coefficients, _, rank, _ = lstsq(design, response, check_finite=False)
+    if rank < 2:
+        raise ValueError("405 signal must vary enough to fit slope and intercept")
+    slope, intercept = coefficients
+    return float(slope), float(intercept)
 
 
 def irls_dynamic_correction(
@@ -215,6 +282,7 @@ def analyze_sessions(
     interval_hours: float = 1,
     fitting_cutoff: float = 0,
     weight_fit: bool = True,
+    fit_weights: np.ndarray | None = None,
 ) -> CircadianAnalysisResult:
     """Run the converted circadian fiber photometry session analysis."""
 
@@ -231,6 +299,7 @@ def analyze_sessions(
         fs,
         fitting_cutoff=fitting_cutoff,
         weight_fit=weight_fit,
+        fit_weights=fit_weights,
     )
 
     samples, channels, sessions = fit.dff.shape
