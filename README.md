@@ -3,7 +3,9 @@ A Python library of analysis code for circadian fiber photometry experiments
 
 This package converts the analysis portions of the legacy MATLAB scripts in
 `matlab_scripts/` to Python. It intentionally does not read `.doric` files; pass
-NumPy arrays from your existing reader into the public API.
+NumPy arrays from your existing reader into the public API. It can also generate
+synthetic Doric HDF5 files with plausible photometry traces for tests and
+simulations.
 
 ## Attribution
 
@@ -56,6 +58,37 @@ The package exposes:
 - `extract_light_pulse_windows`
 - `sessionize_stream_pair`
 - `analyze_stream_pair`
+- `generate_synthetic_doric`
+
+## Synthetic Doric files
+
+Use `generate_synthetic_doric` to create deterministic `.doric` HDF5 files that
+mirror the Doric FPConsole hierarchy used by the legacy MATLAB readers:
+
+```python
+from circadian_fiber_photometry import (
+    SyntheticDoricConfig,
+    generate_synthetic_doric,
+)
+
+summary = generate_synthetic_doric(
+    "synthetic.doric",
+    SyntheticDoricConfig(
+        series_count=8,
+        session_duration_seconds=610,
+        inter_series_gap_seconds=1190,
+        fs=60,
+        channel_count=2,
+        seed=123,
+    ),
+)
+
+print(summary.event_sample_indices)
+```
+
+The generator writes Doric-like configuration metadata and per-series lock-in,
+analog input, analog output, and digital IO groups. It does not attempt to
+guarantee Doric Neuroscience Studio GUI import compatibility.
 
 ## Stream dictionaries
 

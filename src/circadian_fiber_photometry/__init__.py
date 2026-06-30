@@ -1,7 +1,8 @@
 """Circadian fiber photometry analysis utilities.
 
 This package intentionally excludes Doric IO. Pass NumPy arrays from your
-application's reader into the analysis functions exported here.
+application's reader into the analysis functions exported here. It can generate
+synthetic Doric HDF5 files for tests and simulations.
 """
 
 from .analysis import (
@@ -27,6 +28,12 @@ from .streams import (
     estimate_interval_hours,
     sessionize_stream_pair,
 )
+from .synthetic_doric import (
+    SyntheticDoricConfig,
+    SyntheticDoricSummary,
+    SyntheticSignalConfig,
+    generate_synthetic_doric,
+)
 
 __all__ = [
     "CircadianAnalysisResult",
@@ -36,6 +43,9 @@ __all__ = [
     "IntervalHoursEstimate",
     "LightPulseWindowResult",
     "SessionizedStreamPair",
+    "SyntheticDoricConfig",
+    "SyntheticDoricSummary",
+    "SyntheticSignalConfig",
     "TimestampGapReport",
     "analyze_sessions",
     "analyze_stream_pair",
@@ -44,6 +54,7 @@ __all__ = [
     "estimate_interval_hours",
     "extract_light_pulse_windows",
     "fit_405_to_465",
+    "generate_synthetic_doric",
     "irls_dynamic_correction",
     "sessionize_stream_pair",
 ]
