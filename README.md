@@ -1,4 +1,5 @@
 # circadian-fiber-photometry
+
 A Python library of analysis code for circadian fiber photometry experiments
 
 This package converts the analysis portions of the legacy MATLAB scripts in
@@ -9,10 +10,15 @@ simulations.
 
 ## Attribution
 
-The original MATLAB scripts were authored by Qijun Tang. Codex, using HHS
-ChatGPT 5.5 Thinking Extra High at 1.5 speed, was used to convert the MATLAB
-analysis scripts into a reusable Python package. The conversion was authored by
-Josh Lawrimore, PhD.
+The original MATLAB scripts were authored by Qijun Tang. The analysis code in
+this repository is intended to support long-term circadian fiber photometry
+workflows, with methodological background and best-practice considerations
+discussed in [Tang et al., "Long-term optical monitoring of genetically encoded
+fluorescent indicators," PNAS Nexus,
+2025](https://doi.org/10.1093/pnasnexus/pgaf372). Codex, using HHS ChatGPT 5.5
+Thinking Extra High at 1.5 speed, was used to convert the MATLAB analysis
+scripts into a reusable Python package. The conversion was authored by Josh
+Lawrimore, PhD.
 
 ## Install from GitHub with uv
 
