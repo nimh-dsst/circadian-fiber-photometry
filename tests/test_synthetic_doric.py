@@ -9,9 +9,14 @@ from circadian_fiber_photometry import (
 )
 from circadian_fiber_photometry.simulation import (
     SyntheticDoricConfig,
+    SyntheticSignalConfig,
     SyntheticTTLBehaviorCodeConfig,
     SyntheticTTLBehaviorEventConfig,
     SyntheticTTLRandomBehaviorEventConfig,
+    add_gaussian_noise,
+    add_random_calcium_events,
+    add_scheduled_calcium_events,
+    add_tonic_component,
     generate_synthetic_doric,
 )
 
@@ -27,6 +32,23 @@ def _config(**overrides: object) -> SyntheticDoricConfig:
     }
     values.update(overrides)
     return SyntheticDoricConfig(**values)
+
+
+def _flat_signal_config(**overrides: object) -> SyntheticSignalConfig:
+    values = {
+        "isosbestic_baseline": 0.08,
+        "calcium_baseline": 0.18,
+        "channel_baseline_step": 0.0,
+        "bleaching_fraction": 0.0,
+        "artifact_amplitude": 0.0,
+        "circadian_amplitude": 0.0,
+        "noise_std": 0.0,
+        "analog_noise_std": 0.0,
+        "transient_rate_per_minute": 0.0,
+        "transient_amplitude": 0.0,
+    }
+    values.update(overrides)
+    return SyntheticSignalConfig(**values)
 
 
 def _read_values(path, dataset_name: str) -> np.ndarray:
@@ -111,6 +133,160 @@ def test_generate_synthetic_doric_writes_expected_layout(tmp_path) -> None:
         digital_io = series["DigitalIO"]
         assert list(digital_io.keys()) == ["Time", "DIO01", "DIO02"]
         assert digital_io["DIO02"][:] == pytest.approx(np.zeros(400))
+
+
+def test_generate_synthetic_doric_applies_configured_tonic_component(
+    tmp_path,
+) -> None:
+    path = tmp_path / "tonic_component.doric"
+    signal = add_tonic_component(
+        _flat_signal_config(),
+        amplitude=0.02,
+        frequency_hz=0.25,
+        channels=(1,),
+        series_numbers=(1,),
+    )
+    config = _config(series_count=2, channel_count=2, fs=20.0, signal=signal)
+
+    generate_synthetic_doric(path, config)
+
+    calcium_channel_1 = _read_values(
+        path,
+        "DataAcquisition/FPConsole/Signals/Series0001/"
+        "AIN01xAOUT02-LockIn/Values",
+    )
+    calcium_channel_2 = _read_values(
+        path,
+        "DataAcquisition/FPConsole/Signals/Series0001/"
+        "AIN02xAOUT02-LockIn/Values",
+    )
+    calcium_series_2 = _read_values(
+        path,
+        "DataAcquisition/FPConsole/Signals/Series0002/"
+        "AIN01xAOUT02-LockIn/Values",
+    )
+    time = np.arange(calcium_channel_1.size, dtype=float) / config.fs
+    isosbestic = 0.08 * (1 - 0.015 * (time / time[-1]))
+    baseline = 0.18 + 1.25 * (isosbestic - 0.08)
+    expected = baseline + 0.02 * np.sin(2 * np.pi * 0.25 * time)
+
+    np.testing.assert_allclose(calcium_channel_1, expected)
+    np.testing.assert_allclose(calcium_channel_2, baseline)
+    np.testing.assert_allclose(calcium_series_2, baseline)
+
+
+def test_generate_synthetic_doric_applies_scheduled_calcium_events_with_default_rates(
+    tmp_path,
+) -> None:
+    path = tmp_path / "scheduled_calcium_events.doric"
+    event_time_seconds = 6.0
+    amplitude = 0.05
+    signal = add_scheduled_calcium_events(
+        _flat_signal_config(),
+        [event_time_seconds],
+        amplitude=amplitude,
+        channels=(1,),
+        series_numbers=(1,),
+    )
+    config = _config(series_count=1, channel_count=1, fs=20.0, signal=signal)
+
+    summary = generate_synthetic_doric(path, config)
+
+    event_sample = int(round(event_time_seconds * config.fs))
+    np.testing.assert_array_equal(summary.event_sample_indices[(1, 1)], [event_sample])
+    calcium = _read_values(
+        path,
+        "DataAcquisition/FPConsole/Signals/Series0001/"
+        "AIN01xAOUT02-LockIn/Values",
+    )
+    tail_time = np.arange(calcium.size - event_sample, dtype=float) / config.fs
+    kernel = (1 - np.exp(-9.0 * tail_time)) * np.exp(-1.0 * tail_time)
+    kernel = kernel / np.max(kernel)
+    time = np.arange(calcium.size, dtype=float) / config.fs
+    isosbestic = 0.08 * (1 - 0.015 * (time / time[-1]))
+    baseline = 0.18 + 1.25 * (isosbestic - 0.08)
+
+    np.testing.assert_allclose(
+        calcium[event_sample : event_sample + 40],
+        baseline[event_sample : event_sample + 40] + amplitude * kernel[:40],
+    )
+
+
+def test_generate_synthetic_doric_random_calcium_events_are_scoped_and_reproducible(
+    tmp_path,
+) -> None:
+    signal = add_random_calcium_events(
+        _flat_signal_config(),
+        rate_per_minute=120.0,
+        start_window_seconds=(5.0, 15.0),
+        channels=(2,),
+        series_numbers=(1, 3),
+    )
+    config = _config(
+        series_count=3,
+        channel_count=2,
+        fs=20.0,
+        seed=77,
+        signal=signal,
+    )
+
+    first = generate_synthetic_doric(tmp_path / "random_first.doric", config)
+    second = generate_synthetic_doric(tmp_path / "random_second.doric", config)
+    different = generate_synthetic_doric(
+        tmp_path / "random_different.doric",
+        _config(
+            series_count=3,
+            channel_count=2,
+            fs=20.0,
+            seed=78,
+            signal=signal,
+        ),
+    )
+
+    np.testing.assert_array_equal(
+        first.event_sample_indices[(1, 2)],
+        second.event_sample_indices[(1, 2)],
+    )
+    np.testing.assert_array_equal(
+        first.event_sample_indices[(3, 2)],
+        second.event_sample_indices[(3, 2)],
+    )
+    assert not np.array_equal(
+        first.event_sample_indices[(1, 2)],
+        different.event_sample_indices[(1, 2)],
+    )
+    assert first.event_sample_indices[(1, 1)].size == 0
+    assert first.event_sample_indices[(2, 2)].size == 0
+    assert first.event_sample_indices[(3, 1)].size == 0
+    assert first.event_sample_indices[(1, 2)].size > 0
+    assert first.event_sample_indices[(3, 2)].size > 0
+    assert np.all(first.event_sample_indices[(1, 2)] >= 100)
+    assert np.all(first.event_sample_indices[(1, 2)] < 300)
+
+
+def test_generate_synthetic_doric_configured_gaussian_noise_is_seed_reproducible(
+    tmp_path,
+) -> None:
+    signal = add_gaussian_noise(_flat_signal_config(), calcium_std=0.01)
+    config = _config(series_count=1, channel_count=1, seed=90, signal=signal)
+
+    generate_synthetic_doric(tmp_path / "noise_first.doric", config)
+    generate_synthetic_doric(tmp_path / "noise_second.doric", config)
+    generate_synthetic_doric(
+        tmp_path / "noise_different.doric",
+        _config(series_count=1, channel_count=1, seed=91, signal=signal),
+    )
+
+    dataset_name = (
+        "DataAcquisition/FPConsole/Signals/Series0001/"
+        "AIN01xAOUT02-LockIn/Values"
+    )
+    first = _read_values(tmp_path / "noise_first.doric", dataset_name)
+    second = _read_values(tmp_path / "noise_second.doric", dataset_name)
+    different = _read_values(tmp_path / "noise_different.doric", dataset_name)
+
+    np.testing.assert_allclose(first, second)
+    assert not np.allclose(first, different)
 
 
 def test_generate_synthetic_doric_writes_three_pulse_behavior_code(tmp_path) -> None:

@@ -86,7 +86,9 @@ The package exposes:
   `extract_light_pulse_windows`
 - Pipelines and adapters: `analyze_sessions`, `sessionize_stream_pair`,
   `analyze_stream_pair`
-- Simulation: `generate_synthetic_doric`
+- Simulation: `generate_synthetic_doric`, `add_tonic_component`,
+  `add_scheduled_calcium_events`, `add_random_calcium_events`,
+  `add_gaussian_noise`
 
 Modular imports are available when you want to build custom pipelines:
 
@@ -105,10 +107,36 @@ mirror the Doric FPConsole hierarchy used by the legacy MATLAB readers:
 ```python
 from circadian_fiber_photometry.simulation import (
     SyntheticDoricConfig,
+    SyntheticSignalConfig,
     SyntheticTTLBehaviorCodeConfig,
     SyntheticTTLBehaviorEventConfig,
+    add_gaussian_noise,
+    add_random_calcium_events,
+    add_scheduled_calcium_events,
+    add_tonic_component,
     generate_synthetic_doric,
 )
+
+signal = SyntheticSignalConfig()
+signal = add_tonic_component(
+    signal,
+    amplitude=0.012,
+    frequency_hz=1 / 86400,
+    name="daily calcium rhythm",
+)
+signal = add_scheduled_calcium_events(
+    signal,
+    [30.0, 120.0, 240.0],
+    amplitude=0.04,
+    name="known events",
+)
+signal = add_random_calcium_events(
+    signal,
+    rate_per_minute=2.0,
+    start_window_seconds=(10.0, 590.0),
+    name="background events",
+)
+signal = add_gaussian_noise(signal, calcium_std=0.001, isosbestic_std=0.0005)
 
 summary = generate_synthetic_doric(
     "synthetic.doric",
@@ -119,6 +147,7 @@ summary = generate_synthetic_doric(
         fs=60,
         channel_count=2,
         seed=123,
+        signal=signal,
         ttl_behavior_codes=(
             SyntheticTTLBehaviorCodeConfig("lick", channel=1, pulse_count=1),
             SyntheticTTLBehaviorCodeConfig("entry", channel=1, pulse_count=2),
@@ -152,6 +181,12 @@ from circadian_fiber_photometry import load_doric, run_analysis
 dataset = load_doric("synthetic.doric")
 result = run_analysis(dataset, analysis="phasic", config={"interval_hours": 0.5})
 ```
+
+Tonic components are additive calcium-channel sinusoids with amplitude and
+frequency controls. Scheduled calcium events use seconds relative to each
+series start; random calcium events are seeded from `SyntheticDoricConfig.seed`.
+Calcium events default to a 9 s^-1 rise rate and 1 s^-1 fall rate, matching the
+jGCaMP7-style kinetics used by the simulator.
 
 ## Stream dictionaries
 

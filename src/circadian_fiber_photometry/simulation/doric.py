@@ -2,12 +2,63 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
 import h5py
 import numpy as np
+
+
+@dataclass(frozen=True)
+class SyntheticTonicComponentConfig:
+    """Additive low-frequency calcium component for synthetic traces."""
+
+    amplitude: float
+    frequency_hz: float
+    phase_radians: float = 0.0
+    offset: float = 0.0
+    channels: tuple[int, ...] | None = None
+    series_numbers: tuple[int, ...] | None = None
+    name: str | None = None
+
+
+@dataclass(frozen=True)
+class SyntheticScheduledCalciumEventConfig:
+    """Explicit calcium-event starts in seconds relative to each series."""
+
+    event_times_seconds: tuple[float, ...]
+    amplitude: float = 0.030
+    rise_rate_per_second: float = 9.0
+    fall_rate_per_second: float = 1.0
+    channels: tuple[int, ...] | None = None
+    series_numbers: tuple[int, ...] | None = None
+    name: str | None = None
+
+
+@dataclass(frozen=True)
+class SyntheticRandomCalciumEventConfig:
+    """Seeded random calcium-event source for synthetic traces."""
+
+    rate_per_minute: float = 1.0
+    amplitude: float = 0.030
+    rise_rate_per_second: float = 9.0
+    fall_rate_per_second: float = 1.0
+    start_window_seconds: tuple[float, float] | None = None
+    channels: tuple[int, ...] | None = None
+    series_numbers: tuple[int, ...] | None = None
+    name: str | None = None
+
+
+@dataclass(frozen=True)
+class SyntheticGaussianNoiseConfig:
+    """Additional independent Gaussian noise for synthetic signal streams."""
+
+    isosbestic_std: float = 0.0
+    calcium_std: float = 0.0
+    analog_in_std: float = 0.0
+    name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -26,6 +77,115 @@ class SyntheticSignalConfig:
     transient_amplitude: float = 0.030
     transient_rise_seconds: float = 0.4
     transient_decay_seconds: float = 3.0
+    tonic_components: tuple[SyntheticTonicComponentConfig, ...] = ()
+    scheduled_calcium_events: tuple[SyntheticScheduledCalciumEventConfig, ...] = ()
+    random_calcium_events: tuple[SyntheticRandomCalciumEventConfig, ...] = ()
+    gaussian_noise: tuple[SyntheticGaussianNoiseConfig, ...] = ()
+
+
+def add_tonic_component(
+    signal: SyntheticSignalConfig,
+    *,
+    amplitude: float,
+    frequency_hz: float,
+    phase_radians: float = 0.0,
+    offset: float = 0.0,
+    channels: Sequence[int] | np.ndarray | None = None,
+    series_numbers: Sequence[int] | np.ndarray | None = None,
+    name: str | None = None,
+) -> SyntheticSignalConfig:
+    """Return ``signal`` with an additive tonic calcium component appended."""
+
+    component = SyntheticTonicComponentConfig(
+        amplitude=amplitude,
+        frequency_hz=frequency_hz,
+        phase_radians=phase_radians,
+        offset=offset,
+        channels=_normalize_optional_int_tuple(channels),
+        series_numbers=_normalize_optional_int_tuple(series_numbers),
+        name=name,
+    )
+    return replace(
+        signal,
+        tonic_components=signal.tonic_components + (component,),
+    )
+
+
+def add_scheduled_calcium_events(
+    signal: SyntheticSignalConfig,
+    event_times_seconds: Sequence[float] | np.ndarray,
+    *,
+    amplitude: float = 0.030,
+    rise_rate_per_second: float = 9.0,
+    fall_rate_per_second: float = 1.0,
+    channels: Sequence[int] | np.ndarray | None = None,
+    series_numbers: Sequence[int] | np.ndarray | None = None,
+    name: str | None = None,
+) -> SyntheticSignalConfig:
+    """Return ``signal`` with explicit calcium-event starts appended."""
+
+    event_source = SyntheticScheduledCalciumEventConfig(
+        event_times_seconds=_normalize_float_tuple(event_times_seconds),
+        amplitude=amplitude,
+        rise_rate_per_second=rise_rate_per_second,
+        fall_rate_per_second=fall_rate_per_second,
+        channels=_normalize_optional_int_tuple(channels),
+        series_numbers=_normalize_optional_int_tuple(series_numbers),
+        name=name,
+    )
+    return replace(
+        signal,
+        scheduled_calcium_events=signal.scheduled_calcium_events + (event_source,),
+    )
+
+
+def add_random_calcium_events(
+    signal: SyntheticSignalConfig,
+    *,
+    rate_per_minute: float = 1.0,
+    amplitude: float = 0.030,
+    rise_rate_per_second: float = 9.0,
+    fall_rate_per_second: float = 1.0,
+    start_window_seconds: tuple[float, float] | None = None,
+    channels: Sequence[int] | np.ndarray | None = None,
+    series_numbers: Sequence[int] | np.ndarray | None = None,
+    name: str | None = None,
+) -> SyntheticSignalConfig:
+    """Return ``signal`` with a seeded random calcium-event source appended."""
+
+    event_source = SyntheticRandomCalciumEventConfig(
+        rate_per_minute=rate_per_minute,
+        amplitude=amplitude,
+        rise_rate_per_second=rise_rate_per_second,
+        fall_rate_per_second=fall_rate_per_second,
+        start_window_seconds=start_window_seconds,
+        channels=_normalize_optional_int_tuple(channels),
+        series_numbers=_normalize_optional_int_tuple(series_numbers),
+        name=name,
+    )
+    return replace(
+        signal,
+        random_calcium_events=signal.random_calcium_events + (event_source,),
+    )
+
+
+def add_gaussian_noise(
+    signal: SyntheticSignalConfig,
+    *,
+    isosbestic_std: float = 0.0,
+    calcium_std: float = 0.0,
+    analog_in_std: float = 0.0,
+    name: str | None = None,
+) -> SyntheticSignalConfig:
+    """Return ``signal`` with an additional Gaussian noise source appended."""
+
+    noise = SyntheticGaussianNoiseConfig(
+        isosbestic_std=isosbestic_std,
+        calcium_std=calcium_std,
+        analog_in_std=analog_in_std,
+        name=name,
+    )
+    return replace(signal, gaussian_noise=signal.gaussian_noise + (noise,))
 
 
 @dataclass(frozen=True)
@@ -319,7 +479,7 @@ class _ValidatedConfig:
                 "5 second crop"
             )
 
-        _validate_signal_config(config.signal)
+        _validate_signal_config(config.signal, config)
         return cls(
             configured_series_count=configured_series_count,
             samples_per_series=samples_per_series,
@@ -652,23 +812,54 @@ def _generate_channel_signals(
     )
     noise_405 = rng.normal(0.0, signal.noise_std, samples)
     isosbestic = (base_405 * bleaching * within_session_bleach) + artifact + drift
-    isosbestic = isosbestic + noise_405
+    isosbestic = isosbestic + noise_405 + _gaussian_noise_trace(
+        rng,
+        signal.gaussian_noise,
+        "isosbestic_std",
+        samples,
+    )
 
     circadian = signal.circadian_amplitude * np.sin(session_phase)
-    event_indices = _draw_event_indices(rng, config, validated)
-    transient_signal = _transient_trace(
-        event_indices,
+    tonic_signal = _tonic_component_trace(
+        signal,
+        absolute_time,
+        series_index,
+        channel_index,
+    )
+    legacy_event_indices = _draw_event_indices(rng, config, validated)
+    legacy_transient_signal = _transient_trace(
+        legacy_event_indices,
         samples,
         config.fs,
         signal.transient_amplitude * (1 + 0.15 * channel_index),
         signal.transient_rise_seconds,
         signal.transient_decay_seconds,
     )
-    noise_465 = rng.normal(0.0, signal.noise_std, samples)
+    configured_event_indices, configured_transient_signal = (
+        _configured_calcium_event_signal(
+            rng,
+            config,
+            validated,
+            series_index,
+            channel_index,
+        )
+    )
+    event_indices = _merge_event_indices(
+        legacy_event_indices,
+        configured_event_indices,
+    )
+    transient_signal = legacy_transient_signal + configured_transient_signal
+    noise_465 = rng.normal(0.0, signal.noise_std, samples) + _gaussian_noise_trace(
+        rng,
+        signal.gaussian_noise,
+        "calcium_std",
+        samples,
+    )
     calcium = (
         base_465
         + 1.25 * (isosbestic - base_405)
         + circadian
+        + tonic_signal
         + transient_signal
         + noise_465
     )
@@ -678,6 +869,12 @@ def _generate_channel_signals(
         + 2.5 * isosbestic
         + 1.5 * transient_signal
         + rng.normal(0.0, signal.analog_noise_std, samples)
+        + _gaussian_noise_trace(
+            rng,
+            signal.gaussian_noise,
+            "analog_in_std",
+            samples,
+        )
     )
 
     return _GeneratedChannel(
@@ -685,6 +882,225 @@ def _generate_channel_signals(
         calcium_465=calcium.astype(np.float64),
         analog_in=analog_in.astype(np.float64),
         event_indices=event_indices.astype(int),
+    )
+
+
+def _gaussian_noise_trace(
+    rng: np.random.Generator,
+    noise_configs: tuple[SyntheticGaussianNoiseConfig, ...],
+    std_attr: str,
+    samples: int,
+) -> np.ndarray:
+    trace = np.zeros(samples, dtype=float)
+    for noise_config in noise_configs:
+        std = getattr(noise_config, std_attr)
+        if std > 0:
+            trace += rng.normal(0.0, std, samples)
+    return trace
+
+
+def _tonic_component_trace(
+    signal: SyntheticSignalConfig,
+    absolute_time: np.ndarray,
+    series_index: int,
+    channel_index: int,
+) -> np.ndarray:
+    trace = np.zeros_like(absolute_time, dtype=float)
+    for component in signal.tonic_components:
+        if not _component_applies(
+            component.channels,
+            component.series_numbers,
+            series_index,
+            channel_index,
+        ):
+            continue
+        trace += component.offset + component.amplitude * np.sin(
+            2 * np.pi * component.frequency_hz * absolute_time
+            + component.phase_radians
+        )
+    return trace
+
+
+def _configured_calcium_event_signal(
+    rng: np.random.Generator,
+    config: SyntheticDoricConfig,
+    validated: _ValidatedConfig,
+    series_index: int,
+    channel_index: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    samples = validated.samples_per_series
+    trace = np.zeros(samples, dtype=float)
+    event_indices_by_source: list[np.ndarray] = []
+
+    for event_config in config.signal.scheduled_calcium_events:
+        if not _component_applies(
+            event_config.channels,
+            event_config.series_numbers,
+            series_index,
+            channel_index,
+        ):
+            continue
+        event_indices = _event_times_to_indices(
+            event_config.event_times_seconds,
+            config,
+        )
+        event_indices_by_source.append(event_indices)
+        trace += _calcium_event_trace(
+            event_indices,
+            samples,
+            config.fs,
+            event_config.amplitude,
+            event_config.rise_rate_per_second,
+            event_config.fall_rate_per_second,
+        )
+
+    for event_config in config.signal.random_calcium_events:
+        if not _component_applies(
+            event_config.channels,
+            event_config.series_numbers,
+            series_index,
+            channel_index,
+        ):
+            continue
+        event_indices = _draw_random_calcium_event_indices(
+            rng,
+            event_config,
+            config,
+            validated,
+        )
+        event_indices_by_source.append(event_indices)
+        trace += _calcium_event_trace(
+            event_indices,
+            samples,
+            config.fs,
+            event_config.amplitude,
+            event_config.rise_rate_per_second,
+            event_config.fall_rate_per_second,
+        )
+
+    return _merge_event_indices(*event_indices_by_source), trace
+
+
+def _event_times_to_indices(
+    event_times_seconds: tuple[float, ...],
+    config: SyntheticDoricConfig,
+) -> np.ndarray:
+    if len(event_times_seconds) == 0:
+        return np.array([], dtype=int)
+    return np.array(
+        [
+            _nonnegative_seconds_to_samples(
+                event_time_seconds,
+                config.fs,
+                "event_times_seconds",
+            )
+            for event_time_seconds in event_times_seconds
+        ],
+        dtype=int,
+    )
+
+
+def _draw_random_calcium_event_indices(
+    rng: np.random.Generator,
+    event_config: SyntheticRandomCalciumEventConfig,
+    config: SyntheticDoricConfig,
+    validated: _ValidatedConfig,
+) -> np.ndarray:
+    if event_config.rate_per_minute == 0:
+        return np.array([], dtype=int)
+
+    window_start_sample, window_stop_sample = _calcium_random_window_samples(
+        event_config.start_window_seconds,
+        config,
+        validated,
+    )
+    available = window_stop_sample - window_start_sample
+    if available <= 0:
+        return np.array([], dtype=int)
+
+    expected_events = event_config.rate_per_minute * (available / config.fs) / 60
+    event_count = max(1, int(rng.poisson(expected_events)))
+    event_count = min(event_count, available)
+    return np.sort(
+        rng.choice(
+            np.arange(window_start_sample, window_stop_sample),
+            size=event_count,
+            replace=False,
+        )
+    )
+
+
+def _calcium_random_window_samples(
+    start_window_seconds: tuple[float, float] | None,
+    config: SyntheticDoricConfig,
+    validated: _ValidatedConfig,
+) -> tuple[int, int]:
+    if start_window_seconds is None:
+        return (
+            max(validated.crop_samples, 0),
+            validated.samples_per_series - max(validated.crop_samples, 0),
+        )
+
+    start_seconds, stop_seconds = start_window_seconds
+    start_sample = _nonnegative_seconds_to_samples(
+        start_seconds,
+        config.fs,
+        "start_window_seconds",
+    )
+    stop_sample = _nonnegative_seconds_to_samples(
+        stop_seconds,
+        config.fs,
+        "start_window_seconds",
+    )
+    return start_sample, min(stop_sample, validated.samples_per_series)
+
+
+def _calcium_event_trace(
+    event_indices: np.ndarray,
+    samples: int,
+    fs: float,
+    amplitude: float,
+    rise_rate_per_second: float,
+    fall_rate_per_second: float,
+) -> np.ndarray:
+    trace = np.zeros(samples, dtype=float)
+    if event_indices.size == 0:
+        return trace
+
+    for event_index in event_indices:
+        tail_time = np.arange(samples - event_index, dtype=float) / fs
+        kernel = (1 - np.exp(-rise_rate_per_second * tail_time)) * np.exp(
+            -fall_rate_per_second * tail_time
+        )
+        peak = np.max(kernel)
+        if peak > 0:
+            kernel = kernel / peak
+        trace[event_index:] += amplitude * kernel
+    return trace
+
+
+def _merge_event_indices(*event_indices_by_source: np.ndarray) -> np.ndarray:
+    nonempty = [
+        np.asarray(indices, dtype=int)
+        for indices in event_indices_by_source
+        if np.asarray(indices).size > 0
+    ]
+    if not nonempty:
+        return np.array([], dtype=int)
+    return np.sort(np.concatenate(nonempty)).astype(int)
+
+
+def _component_applies(
+    channels: tuple[int, ...] | None,
+    series_numbers: tuple[int, ...] | None,
+    series_index: int,
+    channel_index: int,
+) -> bool:
+    channel_number = channel_index + 1
+    series_number = series_index + 1
+    return (
+        (channels is None or channel_number in channels)
+        and (series_numbers is None or series_number in series_numbers)
     )
 
 
@@ -1106,6 +1522,32 @@ def _graph_attrs(
     }
 
 
+def _normalize_optional_int_tuple(
+    values: Sequence[int] | np.ndarray | None,
+) -> tuple[int, ...] | None:
+    if values is None:
+        return None
+    return tuple(
+        _coerce_selector_int(value) for value in np.asarray(values).reshape(-1)
+    )
+
+
+def _normalize_float_tuple(values: Sequence[float] | np.ndarray) -> tuple[float, ...]:
+    return tuple(float(value) for value in np.asarray(values, dtype=float).reshape(-1))
+
+
+def _coerce_selector_int(value: Any) -> int:
+    if isinstance(value, (np.bool_, bool)):
+        raise ValueError("selector values must be integers")
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (np.floating, float)) and float(value).is_integer():
+        return int(value)
+    raise ValueError("selector values must be integers")
+
+
 def _require_positive_int(value: int, name: str) -> None:
     if not isinstance(value, int) or value <= 0:
         raise ValueError(f"{name} must be a positive integer")
@@ -1126,6 +1568,11 @@ def _require_nonnegative_number(value: float, name: str) -> None:
         raise ValueError(f"{name} must be nonnegative")
 
 
+def _require_finite_number(value: float, name: str) -> None:
+    if not np.isfinite(value):
+        raise ValueError(f"{name} must be finite")
+
+
 def _positive_seconds_to_samples(value: float, fs: float, name: str) -> int:
     _require_positive_number(value, name)
     samples = int(round(value * fs))
@@ -1139,7 +1586,10 @@ def _nonnegative_seconds_to_samples(value: float, fs: float, name: str) -> int:
     return int(round(value * fs))
 
 
-def _validate_signal_config(signal: SyntheticSignalConfig) -> None:
+def _validate_signal_config(
+    signal: SyntheticSignalConfig,
+    config: SyntheticDoricConfig,
+) -> None:
     _require_positive_number(signal.isosbestic_baseline, "isosbestic_baseline")
     _require_positive_number(signal.calcium_baseline, "calcium_baseline")
     _require_nonnegative_number(signal.channel_baseline_step, "channel_baseline_step")
@@ -1156,6 +1606,90 @@ def _validate_signal_config(signal: SyntheticSignalConfig) -> None:
     _require_nonnegative_number(signal.transient_amplitude, "transient_amplitude")
     _require_positive_number(signal.transient_rise_seconds, "transient_rise_seconds")
     _require_positive_number(signal.transient_decay_seconds, "transient_decay_seconds")
+    for component in signal.tonic_components:
+        _validate_tonic_component(component, config)
+    for event_config in signal.scheduled_calcium_events:
+        _validate_scheduled_calcium_event(event_config, config)
+    for event_config in signal.random_calcium_events:
+        _validate_random_calcium_event(event_config, config)
+    for noise_config in signal.gaussian_noise:
+        _validate_gaussian_noise(noise_config)
+
+
+def _validate_tonic_component(
+    component: SyntheticTonicComponentConfig,
+    config: SyntheticDoricConfig,
+) -> None:
+    _require_nonnegative_number(component.amplitude, "tonic amplitude")
+    _require_nonnegative_number(component.frequency_hz, "frequency_hz")
+    _require_finite_number(component.phase_radians, "phase_radians")
+    _require_finite_number(component.offset, "offset")
+    _resolve_channel_numbers(component.channels, config.channel_count)
+    _resolve_ttl_series_numbers(component.series_numbers, config.series_count)
+
+
+def _validate_scheduled_calcium_event(
+    event_config: SyntheticScheduledCalciumEventConfig,
+    config: SyntheticDoricConfig,
+) -> None:
+    if len(event_config.event_times_seconds) == 0:
+        raise ValueError("event_times_seconds must contain at least one time")
+    _validate_calcium_event_shape(
+        event_config.amplitude,
+        event_config.rise_rate_per_second,
+        event_config.fall_rate_per_second,
+    )
+    for event_time_seconds in event_config.event_times_seconds:
+        _require_nonnegative_number(event_time_seconds, "event_times_seconds")
+        event_sample = _nonnegative_seconds_to_samples(
+            event_time_seconds,
+            config.fs,
+            "event_times_seconds",
+        )
+        if event_sample >= int(round(config.fs * config.session_duration_seconds)):
+            raise ValueError("event_times_seconds must fall within the session")
+    _resolve_channel_numbers(event_config.channels, config.channel_count)
+    _resolve_ttl_series_numbers(event_config.series_numbers, config.series_count)
+
+
+def _validate_random_calcium_event(
+    event_config: SyntheticRandomCalciumEventConfig,
+    config: SyntheticDoricConfig,
+) -> None:
+    _require_nonnegative_number(event_config.rate_per_minute, "rate_per_minute")
+    _validate_calcium_event_shape(
+        event_config.amplitude,
+        event_config.rise_rate_per_second,
+        event_config.fall_rate_per_second,
+    )
+    if event_config.start_window_seconds is not None:
+        if len(event_config.start_window_seconds) != 2:
+            raise ValueError("start_window_seconds must contain start and stop times")
+        start_seconds, stop_seconds = event_config.start_window_seconds
+        _require_nonnegative_number(start_seconds, "start_window_seconds")
+        _require_nonnegative_number(stop_seconds, "start_window_seconds")
+        if stop_seconds <= start_seconds:
+            raise ValueError("start_window_seconds stop must be greater than start")
+        if start_seconds >= config.session_duration_seconds:
+            raise ValueError("start_window_seconds must overlap the session")
+    _resolve_channel_numbers(event_config.channels, config.channel_count)
+    _resolve_ttl_series_numbers(event_config.series_numbers, config.series_count)
+
+
+def _validate_calcium_event_shape(
+    amplitude: float,
+    rise_rate_per_second: float,
+    fall_rate_per_second: float,
+) -> None:
+    _require_nonnegative_number(amplitude, "calcium event amplitude")
+    _require_positive_number(rise_rate_per_second, "rise_rate_per_second")
+    _require_positive_number(fall_rate_per_second, "fall_rate_per_second")
+
+
+def _validate_gaussian_noise(noise_config: SyntheticGaussianNoiseConfig) -> None:
+    _require_nonnegative_number(noise_config.isosbestic_std, "isosbestic_std")
+    _require_nonnegative_number(noise_config.calcium_std, "calcium_std")
+    _require_nonnegative_number(noise_config.analog_in_std, "analog_in_std")
 
 
 def _validate_ttl_behavior_codes(
@@ -1281,6 +1815,28 @@ def _validate_dio_channel(channel: int) -> None:
         raise ValueError("TTL channel must be 1 or 2")
 
 
+def _resolve_channel_numbers(
+    channels: tuple[int, ...] | None,
+    channel_count: int,
+) -> tuple[int, ...]:
+    if channels is None:
+        return tuple(range(1, channel_count + 1))
+
+    channel_numbers = tuple(_coerce_selector_int(channel) for channel in channels)
+    if len(channel_numbers) == 0:
+        raise ValueError("channels must not be empty")
+    if len(set(channel_numbers)) != len(channel_numbers):
+        raise ValueError("channels must not contain duplicates")
+    for channel_number in channel_numbers:
+        if (
+            not isinstance(channel_number, int)
+            or isinstance(channel_number, bool)
+            or not 1 <= channel_number <= channel_count
+        ):
+            raise ValueError("channels must contain values between 1 and channel_count")
+    return channel_numbers
+
+
 def _resolve_ttl_series_numbers(
     series_numbers: tuple[int, ...] | None,
     series_count: int,
@@ -1288,13 +1844,20 @@ def _resolve_ttl_series_numbers(
     if series_numbers is None:
         return tuple(range(1, series_count + 1))
 
-    if len(series_numbers) == 0:
+    resolved_series_numbers = tuple(
+        _coerce_selector_int(series_number) for series_number in series_numbers
+    )
+    if len(resolved_series_numbers) == 0:
         raise ValueError("series_numbers must not be empty")
-    if len(set(series_numbers)) != len(series_numbers):
+    if len(set(resolved_series_numbers)) != len(resolved_series_numbers):
         raise ValueError("series_numbers must not contain duplicates")
-    for series_number in series_numbers:
-        if not isinstance(series_number, int) or not 1 <= series_number <= series_count:
+    for series_number in resolved_series_numbers:
+        if (
+            not isinstance(series_number, int)
+            or isinstance(series_number, bool)
+            or not 1 <= series_number <= series_count
+        ):
             raise ValueError(
                 "series_numbers must contain values between 1 and series_count"
             )
-    return series_numbers
+    return resolved_series_numbers
