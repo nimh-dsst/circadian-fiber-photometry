@@ -7,7 +7,7 @@ import pytest
 from circadian_fiber_photometry import (
     analyze_sessions,
 )
-from circadian_fiber_photometry.simulator import (
+from circadian_fiber_photometry.simulation import (
     SyntheticDoricConfig,
     SyntheticTTLBehaviorCodeConfig,
     SyntheticTTLBehaviorEventConfig,

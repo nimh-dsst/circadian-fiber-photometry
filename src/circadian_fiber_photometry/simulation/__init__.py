@@ -1,9 +1,6 @@
-"""Backward-compatible synthetic Doric imports.
+"""Synthetic data generation utilities."""
 
-New code can import these from ``circadian_fiber_photometry.simulator``.
-"""
-
-from .simulator import (
+from .doric import (
     SyntheticDoricConfig,
     SyntheticDoricSummary,
     SyntheticSignalConfig,

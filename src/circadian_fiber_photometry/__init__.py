@@ -1,11 +1,14 @@
 """Circadian fiber photometry analysis utilities.
 
-Tonic functions live in ``circadian_fiber_photometry.tonic``. Phasic functions
-live in ``circadian_fiber_photometry.phasic``. Synthetic Doric generation lives
-in ``circadian_fiber_photometry.simulator``. Common functions are also exported
-at the package root for compatibility.
+Analyses are discoverable from ``circadian_fiber_photometry.analyses``. Doric
+HDF5 loading lives in ``circadian_fiber_photometry.io`` and synthetic Doric
+generation lives in ``circadian_fiber_photometry.simulation``. Common functions
+are also exported at the package root for compatibility.
 """
 
+from .analyses import ANALYSES, get_analysis, list_analyses, run_analysis
+from .io import DoricFileError, load_doric
+from .models import AnalysisResult, AnalysisSpec, DoricDataset
 from .phasic import (
     compute_phasic_level,
     compute_phasic_trace,
@@ -27,7 +30,7 @@ from .results import (
     SessionizedStreamPair,
     TimestampGapReport,
 )
-from .simulator import (
+from .simulation import (
     SyntheticDoricConfig,
     SyntheticDoricSummary,
     SyntheticSignalConfig,
@@ -53,8 +56,13 @@ from .tonic import (
 )
 
 __all__ = [
+    "ANALYSES",
+    "AnalysisResult",
+    "AnalysisSpec",
     "CircadianAnalysisResult",
     "DffFitResult",
+    "DoricDataset",
+    "DoricFileError",
     "EventDetectionResult",
     "IRLSResult",
     "IntervalHoursEstimate",
@@ -82,10 +90,14 @@ __all__ = [
     "extract_light_pulse_windows",
     "fit_405_to_465",
     "generate_synthetic_doric",
+    "get_analysis",
     "integrated_fluorescence",
     "irls_dynamic_correction",
+    "list_analyses",
+    "load_doric",
     "percentile_adjust",
     "positive_only",
+    "run_analysis",
     "sessionize_stream_pair",
     "zscore_levels_by_moving_window",
 ]

@@ -3,10 +3,9 @@
 A Python library of analysis code for circadian fiber photometry experiments
 
 This package converts the analysis portions of the legacy MATLAB scripts in
-`matlab_scripts/` to Python. It intentionally does not read `.doric` files; pass
-NumPy arrays from your existing reader into the public API. It can also generate
+`matlab_scripts/` to Python. It can load Doric-style HDF5 files, generate
 synthetic Doric HDF5 files with plausible photometry traces for tests and
-simulations.
+simulations, and run tonic or phasic analyses through plain Python APIs.
 
 ## Attribution
 
@@ -30,32 +29,39 @@ uv add "circadian-fiber-photometry @ git+https://github.com/nimh-dsst/circadian-
 
 ## Package layout
 
-The package is organized by analysis time scale:
+The package uses a `src/` layout and separates I/O, simulation, and analysis
+logic:
 
+- `circadian_fiber_photometry.io`: Doric HDF5 loading.
+- `circadian_fiber_photometry.simulation`: synthetic Doric HDF5 generation.
+- `circadian_fiber_photometry.analyses`: discoverable tonic and phasic analysis
+  registry.
 - `circadian_fiber_photometry.tonic`: global 405-to-465 fitting, tonic
   percentile levels, raw median levels, and 24-hour moving-window detrending.
 - `circadian_fiber_photometry.phasic`: IRLS dynamic correction, event counting,
   positive percentile-adjusted phasic traces, integrated fluorescence, and
   light-pulse windows.
-- `circadian_fiber_photometry.simulator`: synthetic Doric HDF5 generation.
 
-The root package still re-exports the common functions for compatibility, but
-new code should prefer the time-scale-specific modules.
+The root package re-exports common functions for compatibility. New code should
+prefer `io`, `simulation`, and `analyses` for package-level workflows.
 
 ## Usage
 
 ```python
-from circadian_fiber_photometry import analyze_sessions
+from circadian_fiber_photometry import load_doric, run_analysis
 
-result = analyze_sessions(
-    isosbestic_405,
-    calcium_465,
-    fs=60,
-    interval_hours=1,
+dataset = load_doric("example.doric")
+
+result = run_analysis(
+    dataset,
+    analysis="tonic",
+    config={
+        "interval_hours": 1,
+        "weight_fit": False,
+    },
 )
 
-print(result.level_tonic)
-print(result.event_counts)
+print(result.arrays["level_tonic"])
 ```
 
 Session-aware inputs can be either `(samples, sessions)` for one channel or
@@ -71,6 +77,8 @@ regression.
 
 The package exposes:
 
+- I/O: `load_doric`
+- Registry: `list_analyses`, `run_analysis`
 - Tonic: `fit_405_to_465`, `compute_tonic_level`,
   `detrend_levels_by_moving_window`, `zscore_levels_by_moving_window`
 - Phasic: `irls_dynamic_correction`, `count_events`, `compute_phasic_trace`,
@@ -78,11 +86,13 @@ The package exposes:
   `extract_light_pulse_windows`
 - Pipelines and adapters: `analyze_sessions`, `sessionize_stream_pair`,
   `analyze_stream_pair`
-- Simulator: `generate_synthetic_doric`
+- Simulation: `generate_synthetic_doric`
 
 Modular imports are available when you want to build custom pipelines:
 
 ```python
+from circadian_fiber_photometry.io import load_doric
+from circadian_fiber_photometry.analyses import list_analyses, run_analysis
 from circadian_fiber_photometry.phasic import count_events, irls_dynamic_correction
 from circadian_fiber_photometry.tonic import fit_405_to_465, compute_tonic_level
 ```
@@ -93,7 +103,7 @@ Use `generate_synthetic_doric` to create deterministic `.doric` HDF5 files that
 mirror the Doric FPConsole hierarchy used by the legacy MATLAB readers:
 
 ```python
-from circadian_fiber_photometry.simulator import (
+from circadian_fiber_photometry.simulation import (
     SyntheticDoricConfig,
     SyntheticTTLBehaviorCodeConfig,
     SyntheticTTLBehaviorEventConfig,
@@ -133,6 +143,15 @@ guarantee Doric Neuroscience Studio GUI import compatibility. Digital IO TTL
 pulse timing is relative to the start of each series. Behavior codes are encoded
 by pulse count; by default each pulse is 50 ms high with a 50 ms low gap, so
 within-sequence rising edges are 100 ms apart.
+
+Generated files can be loaded directly:
+
+```python
+from circadian_fiber_photometry import load_doric, run_analysis
+
+dataset = load_doric("synthetic.doric")
+result = run_analysis(dataset, analysis="phasic", config={"interval_hours": 0.5})
+```
 
 ## Stream dictionaries
 

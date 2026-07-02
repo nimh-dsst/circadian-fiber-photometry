@@ -1,8 +1,8 @@
 """Adapters for already-loaded stream dictionaries.
 
-The package does not read Doric or pickle files. These helpers accept the
-in-memory dictionaries produced by an upstream loader and convert concatenated
-1D streams into the session matrices used by the analysis functions.
+These helpers accept in-memory dictionaries produced by an upstream loader and
+convert concatenated 1D streams into the session matrices used by the analysis
+functions. Doric HDF5 files can be loaded with ``circadian_fiber_photometry.io``.
 """
 
 from __future__ import annotations
