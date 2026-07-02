@@ -12,7 +12,7 @@ uv run pytest
 
 ## Repository Purpose
 
-This repository has three primary purposes:
+This repository has four primary purposes:
 
 1. Preserve the original MATLAB source material.
 
@@ -29,3 +29,6 @@ This repository has three primary purposes:
    - Tonic analyses: long time scale analyses focused on global isosbestic correction, sliding window averaging, and percentile filtering to separate tonic and phasic contributions to the signal.
    - Phasic analyses: short time scale analyses focused on identifying intra-session events, ordinary least squares fitting of the isosbestic signal, iteratively reweighted least squares fitting of the isosbestic signal, peak identification, integrated fluorescence, and power spectra analysis.
 
+4. Provide a comprehensive Doric HDF5 file simulator.
+
+   The repository should include a simulator for generating Doric files, which are HDF5 files, so users can build large synthetic datasets for testing the tonic and phasic analysis functions. Simulator code and related assets should live in a dedicated `simulator/` subdirectory and remain separate from the tonic and phasic analysis code.

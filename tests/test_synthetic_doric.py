@@ -5,11 +5,13 @@ import numpy as np
 import pytest
 
 from circadian_fiber_photometry import (
+    analyze_sessions,
+)
+from circadian_fiber_photometry.simulator import (
     SyntheticDoricConfig,
     SyntheticTTLBehaviorCodeConfig,
     SyntheticTTLBehaviorEventConfig,
     SyntheticTTLRandomBehaviorEventConfig,
-    analyze_sessions,
     generate_synthetic_doric,
 )
 

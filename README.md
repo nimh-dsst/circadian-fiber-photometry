@@ -28,6 +28,20 @@ Pin a tag or commit from your application:
 uv add "circadian-fiber-photometry @ git+https://github.com/nimh-dsst/circadian-fiber-photometry.git@<tag-or-commit>"
 ```
 
+## Package layout
+
+The package is organized by analysis time scale:
+
+- `circadian_fiber_photometry.tonic`: global 405-to-465 fitting, tonic
+  percentile levels, raw median levels, and 24-hour moving-window detrending.
+- `circadian_fiber_photometry.phasic`: IRLS dynamic correction, event counting,
+  positive percentile-adjusted phasic traces, integrated fluorescence, and
+  light-pulse windows.
+- `circadian_fiber_photometry.simulator`: synthetic Doric HDF5 generation.
+
+The root package still re-exports the common functions for compatibility, but
+new code should prefer the time-scale-specific modules.
+
 ## Usage
 
 ```python
@@ -57,14 +71,21 @@ regression.
 
 The package exposes:
 
-- `fit_405_to_465`
-- `irls_dynamic_correction`
-- `count_events`
-- `analyze_sessions`
-- `extract_light_pulse_windows`
-- `sessionize_stream_pair`
-- `analyze_stream_pair`
-- `generate_synthetic_doric`
+- Tonic: `fit_405_to_465`, `compute_tonic_level`,
+  `detrend_levels_by_moving_window`, `zscore_levels_by_moving_window`
+- Phasic: `irls_dynamic_correction`, `count_events`, `compute_phasic_trace`,
+  `compute_phasic_level`, `integrated_fluorescence`,
+  `extract_light_pulse_windows`
+- Pipelines and adapters: `analyze_sessions`, `sessionize_stream_pair`,
+  `analyze_stream_pair`
+- Simulator: `generate_synthetic_doric`
+
+Modular imports are available when you want to build custom pipelines:
+
+```python
+from circadian_fiber_photometry.phasic import count_events, irls_dynamic_correction
+from circadian_fiber_photometry.tonic import fit_405_to_465, compute_tonic_level
+```
 
 ## Synthetic Doric files
 
@@ -72,7 +93,7 @@ Use `generate_synthetic_doric` to create deterministic `.doric` HDF5 files that
 mirror the Doric FPConsole hierarchy used by the legacy MATLAB readers:
 
 ```python
-from circadian_fiber_photometry import (
+from circadian_fiber_photometry.simulator import (
     SyntheticDoricConfig,
     SyntheticTTLBehaviorCodeConfig,
     SyntheticTTLBehaviorEventConfig,
@@ -150,5 +171,5 @@ By default, sessions are split at timestamp resets or gaps greater than one
 second. If timestamps are continuous with no gaps, pass
 `session_duration_seconds`.
 
-The legacy MATLAB power-map output is not implemented because the referenced
-`count_frequence` helper is not present in this repository.
+The legacy MATLAB wavelet power-map output from `count_frequence.m` has not
+been ported into the Python package yet.

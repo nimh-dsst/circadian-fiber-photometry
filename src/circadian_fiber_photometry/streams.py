@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from .analysis import analyze_sessions
+from .pipeline import analyze_sessions
 from .results import (
     CircadianAnalysisResult,
     IntervalHoursEstimate,
