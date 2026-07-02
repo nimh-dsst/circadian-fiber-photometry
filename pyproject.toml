@@ -29,7 +29,8 @@ dev = [
 notebooks = [
   "ipykernel>=7.3.0",
   "jupyterlab>=4.6.1",
-  "matplotlib>=3.10.9",
+  "plotly>=6.8.0",
+  "plotly-resampler>=0.11.0",
 ]
 
 [tool.hatch.build.targets.wheel]
