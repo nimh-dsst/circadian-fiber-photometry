@@ -1,5 +1,14 @@
 """Synthetic data generation utilities."""
 
+from .artifact import (
+    SyntheticArtifactOccurrence,
+    SyntheticRandomBoxArtifactConfig,
+    SyntheticScheduledBoxArtifactConfig,
+    SyntheticSessionStartSpikeConfig,
+    add_random_box_artifacts,
+    add_scheduled_box_artifacts,
+    configure_session_start_spike,
+)
 from .doric import (
     SyntheticDoricConfig,
     SyntheticDoricSummary,
@@ -20,11 +29,15 @@ from .doric import (
 )
 
 __all__ = [
+    "SyntheticArtifactOccurrence",
     "SyntheticDoricConfig",
     "SyntheticDoricSummary",
     "SyntheticGaussianNoiseConfig",
+    "SyntheticRandomBoxArtifactConfig",
     "SyntheticRandomCalciumEventConfig",
+    "SyntheticScheduledBoxArtifactConfig",
     "SyntheticScheduledCalciumEventConfig",
+    "SyntheticSessionStartSpikeConfig",
     "SyntheticSignalConfig",
     "SyntheticTTLBehaviorCodeConfig",
     "SyntheticTTLBehaviorEventConfig",
@@ -32,8 +45,11 @@ __all__ = [
     "SyntheticTTLRandomBehaviorEventConfig",
     "SyntheticTonicComponentConfig",
     "add_gaussian_noise",
+    "add_random_box_artifacts",
     "add_random_calcium_events",
+    "add_scheduled_box_artifacts",
     "add_scheduled_calcium_events",
     "add_tonic_component",
+    "configure_session_start_spike",
     "generate_synthetic_doric",
 ]

@@ -14,7 +14,7 @@ once their scope is clear.
   request.
 - Add an issue or pull-request link to an item when one exists.
 
-Last reviewed: **2026-07-10**. At that review, `uv run pytest` passed all 58
+Last reviewed: **2026-07-10**. At that review, `uv run pytest` passed all 76
 tests and `uv run ruff check .` passed.
 
 ## Feature request inbox
@@ -83,16 +83,16 @@ Copy this line for each new request:
 - [x] Return ground-truth event and TTL metadata in `SyntheticDoricSummary`.
 - [x] Reject invalid configurations and protect existing files unless overwrite
   is explicitly enabled.
-- [ ] **Session-start spike simulation** — Add a configurable spike to both the
+- [x] **Session-start spike simulation** — Add a configurable spike to both the
   calcium and isosbestic signals at the beginning of every session. Default the
   spike duration to 1 second, make its magnitude configurable, express timing in
   seconds, and include its known sample bounds and parameters in the simulator
   ground truth.
-- [ ] **Scheduled phasic box artifacts** — Accept explicit start times and
+- [x] **Scheduled phasic box artifacts** — Accept explicit start times and
   durations in seconds and add the same signed box-shaped change to the calcium
   and isosbestic signals. Default the magnitude to 10% of each signal's mean and
   support both positive spikes and negative drops.
-- [ ] **Random phasic box artifacts** — Place seeded random box artifacts using
+- [x] **Random phasic box artifacts** — Place seeded random box artifacts using
   configurable counts or rates, time windows, durations, channels, and series.
   Reuse the signed-amplitude behavior of scheduled box artifacts and return
   their ground-truth locations and parameters.

@@ -10,6 +10,18 @@ from typing import Any
 import h5py
 import numpy as np
 
+from .artifact.engine import (
+    ArtifactSchedule,
+    apply_artifact_schedule,
+    build_artifact_schedule,
+)
+from .artifact.models import (
+    SyntheticArtifactOccurrence,
+    SyntheticRandomBoxArtifactConfig,
+    SyntheticScheduledBoxArtifactConfig,
+    SyntheticSessionStartSpikeConfig,
+)
+
 
 @dataclass(frozen=True)
 class SyntheticTonicComponentConfig:
@@ -81,6 +93,9 @@ class SyntheticSignalConfig:
     scheduled_calcium_events: tuple[SyntheticScheduledCalciumEventConfig, ...] = ()
     random_calcium_events: tuple[SyntheticRandomCalciumEventConfig, ...] = ()
     gaussian_noise: tuple[SyntheticGaussianNoiseConfig, ...] = ()
+    session_start_spike: SyntheticSessionStartSpikeConfig | None = None
+    scheduled_box_artifacts: tuple[SyntheticScheduledBoxArtifactConfig, ...] = ()
+    random_box_artifacts: tuple[SyntheticRandomBoxArtifactConfig, ...] = ()
 
 
 def add_tonic_component(
@@ -276,6 +291,7 @@ class SyntheticDoricSummary:
     ttl_pulse_sample_indices: dict[tuple[int, int], np.ndarray]
     ttl_pulse_times_seconds: dict[tuple[int, int], np.ndarray]
     ttl_behavior_events: tuple[SyntheticTTLBehaviorEventSummary, ...]
+    artifact_occurrences: tuple[SyntheticArtifactOccurrence, ...] = ()
 
 
 def generate_synthetic_doric(
@@ -312,8 +328,20 @@ def generate_synthetic_doric(
         dtype=float,
     )
     ttl_schedule = _build_ttl_schedule(config, validated, session_start_times)
+    artifact_schedule = build_artifact_schedule(
+        session_start_spike=config.signal.session_start_spike,
+        scheduled_box_artifacts=config.signal.scheduled_box_artifacts,
+        random_box_artifacts=config.signal.random_box_artifacts,
+        series_count=config.series_count,
+        channel_count=config.channel_count,
+        samples_per_series=validated.samples_per_series,
+        session_duration_seconds=config.session_duration_seconds,
+        fs=config.fs,
+        seed=config.seed,
+    )
     event_sample_indices: dict[tuple[int, int], np.ndarray] = {}
     event_times_seconds: dict[tuple[int, int], np.ndarray] = {}
+    artifact_occurrences: list[SyntheticArtifactOccurrence] = []
 
     with h5py.File(output_path, "w", track_order=True) as h5_file:
         _write_root_attrs(h5_file, config)
@@ -337,12 +365,14 @@ def generate_synthetic_doric(
                     time,
                     series_index,
                     channel_index,
+                    artifact_schedule,
                 )
                 key = (series_index + 1, channel_index + 1)
                 event_sample_indices[key] = generated.event_indices
                 event_times_seconds[key] = (
                     series_start + generated.event_indices / config.fs
                 )
+                artifact_occurrences.extend(generated.artifact_occurrences)
 
                 ain_name = f"AIN{channel_index + 1:02d}"
                 for output_number, values in (
@@ -411,6 +441,18 @@ def generate_synthetic_doric(
         ttl_pulse_sample_indices=ttl_schedule.pulse_sample_indices,
         ttl_pulse_times_seconds=ttl_schedule.pulse_times_seconds,
         ttl_behavior_events=ttl_schedule.behavior_events,
+        artifact_occurrences=tuple(
+            sorted(
+                artifact_occurrences,
+                key=lambda occurrence: (
+                    occurrence.series_number,
+                    occurrence.channel_number,
+                    occurrence.start_sample,
+                    occurrence.artifact_type,
+                    occurrence.source_index,
+                ),
+            )
+        ),
     )
 
 
@@ -420,6 +462,7 @@ class _GeneratedChannel:
     calcium_465: np.ndarray
     analog_in: np.ndarray
     event_indices: np.ndarray
+    artifact_occurrences: tuple[SyntheticArtifactOccurrence, ...]
 
 
 @dataclass(frozen=True)
@@ -787,6 +830,7 @@ def _generate_channel_signals(
     absolute_time: np.ndarray,
     series_index: int,
     channel_index: int,
+    artifact_schedule: ArtifactSchedule,
 ) -> _GeneratedChannel:
     signal = config.signal
     samples = validated.samples_per_series
@@ -877,11 +921,22 @@ def _generate_channel_signals(
         )
     )
 
+    isosbestic, calcium, artifact_occurrences = apply_artifact_schedule(
+        artifact_schedule,
+        series_number=series_index + 1,
+        channel_number=channel_index + 1,
+        series_start_seconds=float(absolute_time[0]),
+        fs=config.fs,
+        isosbestic=isosbestic,
+        calcium=calcium,
+    )
+
     return _GeneratedChannel(
         isosbestic_405=isosbestic.astype(np.float64),
         calcium_465=calcium.astype(np.float64),
         analog_in=analog_in.astype(np.float64),
         event_indices=event_indices.astype(int),
+        artifact_occurrences=artifact_occurrences,
     )
 
 

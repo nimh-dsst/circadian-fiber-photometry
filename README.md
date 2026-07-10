@@ -91,7 +91,8 @@ The package exposes:
   `analyze_stream_pair`
 - Simulation: `generate_synthetic_doric`, `add_tonic_component`,
   `add_scheduled_calcium_events`, `add_random_calcium_events`,
-  `add_gaussian_noise`
+  `add_gaussian_noise`, `configure_session_start_spike`,
+  `add_scheduled_box_artifacts`, `add_random_box_artifacts`
 
 Modular imports are available when you want to build custom pipelines:
 
@@ -114,9 +115,12 @@ from circadian_fiber_photometry.simulation import (
     SyntheticTTLBehaviorCodeConfig,
     SyntheticTTLBehaviorEventConfig,
     add_gaussian_noise,
+    add_random_box_artifacts,
     add_random_calcium_events,
+    add_scheduled_box_artifacts,
     add_scheduled_calcium_events,
     add_tonic_component,
+    configure_session_start_spike,
     generate_synthetic_doric,
 )
 
@@ -140,6 +144,22 @@ signal = add_random_calcium_events(
     name="background events",
 )
 signal = add_gaussian_noise(signal, calcium_std=0.001, isosbestic_std=0.0005)
+signal = configure_session_start_spike(signal)
+signal = add_scheduled_box_artifacts(
+    signal,
+    [45.0, 180.0],
+    durations_seconds=[1.0, 2.0],
+    magnitude_fraction=-0.10,
+    name="known signal drops",
+)
+signal = add_random_box_artifacts(
+    signal,
+    count_per_series=2,
+    start_window_seconds=(10.0, 590.0),
+    duration_range_seconds=(0.5, 1.5),
+    magnitude_fraction=0.10,
+    name="random shared artifacts",
+)
 
 summary = generate_synthetic_doric(
     "synthetic.doric",
@@ -165,6 +185,7 @@ summary = generate_synthetic_doric(
 )
 
 print(summary.event_sample_indices)
+print(summary.artifact_occurrences)
 print(summary.ttl_pulse_sample_indices)
 print(summary.ttl_behavior_events)
 ```
@@ -188,6 +209,48 @@ result = run_analysis(dataset, analysis="phasic", config={"interval_hours": 0.5}
 Tonic components are additive calcium-channel sinusoids with amplitude and
 frequency controls. Scheduled calcium events use seconds relative to each
 series start; random calcium events are seeded from `SyntheticDoricConfig.seed`.
+
+### Signal artifacts
+
+Artifact configuration lives under
+`circadian_fiber_photometry.simulation.artifact` and is re-exported from the
+`simulation` namespace. Artifacts are disabled unless added to a
+`SyntheticSignalConfig`. Enabling them changes only the 405 and 465 lock-in
+traces; simulated analog input remains unchanged.
+
+For each target signal, an artifact's constant box offset is
+
+```text
+offset = magnitude_fraction * mean(pre-artifact signal)
+```
+
+The fraction is signed and unitless. A value of `0.10` adds 10% of that
+signal's pre-artifact mean, while `-0.10` produces a 10% drop. Because each
+signal uses its own mean, 405 and 465 offsets have the same sign but can have
+different voltage magnitudes.
+
+`configure_session_start_spike` adds a box at sample zero to every channel in
+every series. Its defaults are 1 second and `magnitude_fraction=1.0`, which adds
+100% of each signal's mean. Scheduled boxes use times relative to each series;
+one duration can be broadcast to every start or a matching duration can be
+provided per start. Channel and series selectors use Doric's one-based
+numbering.
+
+Random boxes require exactly one of `count_per_series` or `rate_per_minute`.
+Rate mode draws a Poisson count for each selected series. Durations are sampled
+uniformly from `duration_range_seconds`, and selected channels share the same
+random occurrence times. Box artifacts cannot overlap other scheduled or
+random boxes on the same series/channel, although they may overlap the
+session-start spike. Random placement raises `ValueError` when the requested
+non-overlapping schedule cannot fit.
+
+`SyntheticDoricSummary.artifact_occurrences` reports the realized ground truth
+for every affected series/channel: half-open sample bounds, within-series and
+absolute seconds, requested and sample-realized duration, signed fraction, and
+the exact 405/465 voltage offsets. Random scheduling uses a dedicated stream
+derived from `SyntheticDoricConfig.seed`, so it is repeatable without changing
+the simulator's other random traces.
+
 Calcium events default to a 9 s^-1 rise rate and 1 s^-1 fall rate, matching the
 jGCaMP7-style kinetics used by the simulator.
 
