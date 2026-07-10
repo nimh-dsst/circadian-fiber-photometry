@@ -7,6 +7,9 @@ This package converts the analysis portions of the legacy MATLAB scripts in
 synthetic Doric HDF5 files with plausible photometry traces for tests and
 simulations, and run tonic or phasic analyses through plain Python APIs.
 
+Development status and planned work are tracked in the
+[feature checklist](FEATURE_CHECKLIST.md).
+
 ## Attribution
 
 The original MATLAB scripts were authored by Qijun Tang. The analysis code in
