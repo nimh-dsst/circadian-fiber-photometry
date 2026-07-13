@@ -16,18 +16,24 @@ def _(mo):
     mo.md(r"""
     # Photobleaching model comparison
 
-    This example generates three short, deterministic Doric-style datasets
-    with photobleaching disabled, single-exponential photobleaching, and
-    double-exponential photobleaching. Generated files live in a temporary
-    directory and are not committed to the repository.
+    This example generates short, deterministic Doric-style datasets comparing
+    photobleaching without protein turnover, the default 48-hour turnover
+    half-life, a faster custom half-life, and a double-exponential model.
+    Generated files live in a temporary directory and are not committed to the
+    repository.
 
-    For components with fractional losses $A_i$ and time constants $\tau_i$,
-    the simulator applies
+    A bleach-susceptible pool $x_i$ with amplitude $A_i$ follows
 
-    $$B(t) = 1 - \sum_i A_i + \sum_i A_i e^{-t / \tau_i}.$$
+    $$\frac{dx_i}{dt} = k_T(A_i-x_i)-k_{B,i}x_i$$
 
-    Time is cumulative recorded exposure in seconds, so decay pauses during
-    gaps between sessions.
+    during illumination. In a dark inter-session gap, $k_{B,i}=0$, so protein
+    turnover replenishes the unbleached pool. The plotted wall-clock gap makes
+    that recovery visible. The simulator uses $B=1-\sum_i A_i+\sum_i x_i$ as
+    the multiplicative baseline factor.
+
+    Warm yellow bands mark recorded illumination, and the slate band marks the
+    unrecorded dark phase. Horizontal padding separates the rapid drops at the
+    beginning and end of the timeline from the plot frame.
     """)
     return
 
@@ -43,6 +49,7 @@ def _():
     from circadian_fiber_photometry import load_doric
     from circadian_fiber_photometry.simulation import (
         SyntheticDoricConfig,
+        SyntheticPhotobleachingComponentConfig,
         SyntheticPhotobleachingConfig,
         SyntheticSignalConfig,
         generate_synthetic_doric,
@@ -51,6 +58,7 @@ def _():
     return (
         Path,
         SyntheticDoricConfig,
+        SyntheticPhotobleachingComponentConfig,
         SyntheticPhotobleachingConfig,
         SyntheticSignalConfig,
         TemporaryDirectory,
@@ -62,13 +70,28 @@ def _():
 
 
 @app.cell
-def _(SyntheticPhotobleachingConfig):
+def _(SyntheticPhotobleachingComponentConfig, SyntheticPhotobleachingConfig):
+    shared_component = SyntheticPhotobleachingComponentConfig(
+        amplitude_fraction=0.8,
+        time_constant_seconds=18.0,
+    )
     model_configs = {
-        "none": SyntheticPhotobleachingConfig(model="none"),
-        "single exponential": SyntheticPhotobleachingConfig(
-            model="single_exponential"
+        "no photobleaching": SyntheticPhotobleachingConfig(model="none"),
+        "turnover disabled": SyntheticPhotobleachingConfig(
+            isosbestic_components=(shared_component,),
+            calcium_components=(shared_component,),
+            turnover_half_life_hours=None,
         ),
-        "double exponential": SyntheticPhotobleachingConfig(
+        "48 h turnover": SyntheticPhotobleachingConfig(
+            isosbestic_components=(shared_component,),
+            calcium_components=(shared_component,),
+        ),
+        "4 h turnover": SyntheticPhotobleachingConfig(
+            isosbestic_components=(shared_component,),
+            calcium_components=(shared_component,),
+            turnover_half_life_hours=4.0,
+        ),
+        "double, 48 h turnover": SyntheticPhotobleachingConfig(
             model="double_exponential"
         ),
     }
@@ -89,7 +112,7 @@ def _(
     fs = 20.0
     series_count = 2
     session_duration_seconds = 12.0
-    inter_series_gap_seconds = 600.0
+    inter_series_gap_seconds = 12.0 * 3600.0
     temporary_directory = TemporaryDirectory(prefix="photobleaching-example-")
     output_directory = Path(temporary_directory.name)
     simulation_summaries = {}
@@ -128,35 +151,129 @@ def _(
             "calcium": generation_dataset.calcium_465[:, 0, :].T.reshape(-1),
         }
 
-    exposure_seconds = np.arange(
-        series_count * simulation_summaries["none"].samples_per_series,
-        dtype=float,
-    ) / fs
-    assert simulation_summaries["none"].photobleaching.model == "none"
+    reference_summary = simulation_summaries["no photobleaching"]
+    samples_per_series = reference_summary.samples_per_series
+    wall_clock_hours = np.concatenate(
+        [
+            generation_series_start
+            + np.arange(samples_per_series, dtype=float) / fs
+            for generation_series_start in reference_summary.session_start_times
+        ]
+    ) / 3600.0
+    session_duration_hours = samples_per_series / fs / 3600.0
+    light_intervals_hours = tuple(
+        (
+            session_start_seconds / 3600.0,
+            session_start_seconds / 3600.0 + session_duration_hours,
+        )
+        for session_start_seconds in reference_summary.session_start_times
+    )
+    dark_intervals_hours = tuple(
+        (
+            light_intervals_hours[interval_index][1],
+            light_intervals_hours[interval_index + 1][0],
+        )
+        for interval_index in range(len(light_intervals_hours) - 1)
+    )
+    timeline_start_hours = light_intervals_hours[0][0]
+    timeline_end_hours = light_intervals_hours[-1][1]
+    timeline_padding_hours = 0.05 * (
+        timeline_end_hours - timeline_start_hours
+    )
+    timeline_range_hours = (
+        timeline_start_hours - timeline_padding_hours,
+        timeline_end_hours + timeline_padding_hours,
+    )
     assert (
-        simulation_summaries["single exponential"].photobleaching.model
+        simulation_summaries["no photobleaching"].photobleaching.model == "none"
+    )
+    assert (
+        simulation_summaries["48 h turnover"].photobleaching.model
         == "single_exponential"
     )
     assert (
-        simulation_summaries["double exponential"].photobleaching.model
+        simulation_summaries["double, 48 h turnover"].photobleaching.model
         == "double_exponential"
     )
-    np.testing.assert_allclose(traces["none"]["isosbestic"], 0.08)
-    np.testing.assert_allclose(traces["none"]["calcium"], 0.18)
-    return exposure_seconds, simulation_summaries, temporary_directory, traces
+    assert (
+        simulation_summaries["turnover disabled"]
+        .photobleaching.turnover_half_life_hours
+        is None
+    )
+    assert (
+        simulation_summaries["48 h turnover"]
+        .photobleaching.turnover_half_life_hours
+        == 48.0
+    )
+    np.testing.assert_allclose(traces["no photobleaching"]["isosbestic"], 0.08)
+    np.testing.assert_allclose(traces["no photobleaching"]["calcium"], 0.18)
+    return (
+        dark_intervals_hours,
+        light_intervals_hours,
+        simulation_summaries,
+        temporary_directory,
+        timeline_range_hours,
+        traces,
+        wall_clock_hours,
+    )
 
 
 @app.cell
-def _(go, traces, exposure_seconds):
+def _(
+    dark_intervals_hours,
+    go,
+    light_intervals_hours,
+    timeline_range_hours,
+    traces,
+    wall_clock_hours,
+):
     comparison_figure = go.Figure()
     model_colors = {
-        "none": "#4d4d4d",
-        "single exponential": "#4575b4",
-        "double exponential": "#d73027",
+        "no photobleaching": "#4d4d4d",
+        "turnover disabled": "#d73027",
+        "48 h turnover": "#4575b4",
+        "4 h turnover": "#1a9850",
+        "double, 48 h turnover": "#984ea3",
     }
+    for light_start_hours, light_end_hours in light_intervals_hours:
+        comparison_figure.add_vrect(
+            x0=light_start_hours,
+            x1=light_end_hours,
+            fillcolor="rgba(255, 193, 7, 0.18)",
+            layer="below",
+            line_width=0,
+        )
+        comparison_figure.add_annotation(
+            x=(light_start_hours + light_end_hours) / 2.0,
+            y=1.0,
+            xref="x",
+            yref="paper",
+            text="Light",
+            showarrow=False,
+            yanchor="bottom",
+            font={"color": "#9a6700", "size": 12},
+        )
+    for dark_start_hours, dark_end_hours in dark_intervals_hours:
+        comparison_figure.add_vrect(
+            x0=dark_start_hours,
+            x1=dark_end_hours,
+            fillcolor="rgba(71, 85, 105, 0.12)",
+            layer="below",
+            line_width=0,
+        )
+        comparison_figure.add_annotation(
+            x=(dark_start_hours + dark_end_hours) / 2.0,
+            y=1.0,
+            xref="x",
+            yref="paper",
+            text="Dark",
+            showarrow=False,
+            yanchor="bottom",
+            font={"color": "#475569", "size": 12},
+        )
     for trace_model_name, trace_values in traces.items():
         comparison_figure.add_scatter(
-            x=exposure_seconds,
+            x=wall_clock_hours,
             y=trace_values["calcium"] / trace_values["calcium"][0],
             mode="lines",
             name=trace_model_name,
@@ -164,11 +281,12 @@ def _(go, traces, exposure_seconds):
         )
     comparison_figure.update_layout(
         template="plotly_white",
-        title="Calcium baseline under selectable photobleaching models",
-        xaxis_title="Cumulative exposure (seconds)",
+        title="Photobleaching and protein turnover across a 12-hour dark gap",
+        xaxis_title="Wall-clock time (hours)",
         yaxis_title="Normalized calcium baseline",
         legend_title_text="Model",
     )
+    comparison_figure.update_xaxes(range=timeline_range_hours)
     return (comparison_figure,)
 
 
@@ -187,6 +305,8 @@ def _(simulation_summaries):
             {
                 "model": metadata_model_name,
                 "time basis": metadata.time_basis,
+                "turnover half-life (h)": metadata.turnover_half_life_hours,
+                "turnover rate (1/s)": metadata.turnover_rate_per_second,
                 "isosbestic amplitudes": [
                     item.amplitude_fraction
                     for item in metadata.isosbestic_components

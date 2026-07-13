@@ -217,22 +217,39 @@ series start; random calcium events are seeded from `SyntheticDoricConfig.seed`.
 
 Photobleaching is configured independently for the 405 nm isosbestic and
 465 nm calcium baselines. Callers select `"none"`, `"single_exponential"`, or
-`"double_exponential"` through `SyntheticPhotobleachingConfig`. For a signal
-with exponential components `(A_i, tau_i)`, the multiplicative baseline factor
-is
+`"double_exponential"` through `SyntheticPhotobleachingConfig`. Each component
+has a bleach-susceptible protein pool `x_i`, fractional contribution `A_i`, and
+bleaching rate `k_bleach,i = 1 / tau_i`. Protein replacement uses the shared
+rate
 
 ```text
-B(t) = 1 - sum(A_i) + sum(A_i * exp(-t / tau_i))
+k_turnover = log(2) / (turnover_half_life_hours * 3600)
 ```
 
-`A_i` is a unitless long-run fractional loss and `tau_i` is a time constant in
-seconds. Amplitudes must each be in `[0, 1]`, their sum cannot exceed `1`, and
-time constants must be positive. The exposure clock begins at zero, advances
-through recorded samples, and pauses during gaps between sessions. The first
-sample therefore has `B(0) = 1`.
+The renewable pool follows `dx_i/dt = k_turnover * (A_i - x_i) -
+k_bleach,i * x_i` during recorded illumination. During dark gaps, the bleaching
+term is removed and turnover continues as `dx_i/dt = k_turnover * (A_i -
+x_i)`. The multiplicative baseline factor is
 
-The default is a single exponential with amplitude `1` and a time constant of
-twice the file's total active recording duration. This follows the form of
+```text
+B = 1 - sum(A_i) + sum(x_i)
+```
+
+The simulator evaluates the exact exponential solution for both phases rather
+than numerically integrating it. Newly synthesized protein enters the pool
+unbleached, total indicator abundance is held constant, and `x_i(0) = A_i`, so
+the first sample has `B = 1`. Continuing illumination approaches the nonzero
+steady state `x_i = A_i * k_turnover / (k_bleach,i + k_turnover)`.
+
+`A_i` is unitless and `tau_i` is in seconds. Amplitudes must each be in
+`[0, 1]`, their sum cannot exceed `1`, and time constants must be positive. The
+bleaching clock advances only during recorded exposure, while the turnover
+clock advances in wall-clock seconds during recordings and inter-session gaps.
+This permits partial recovery of the bleach-susceptible pool between sessions.
+
+The default is a single exponential with amplitude `1`, a time constant of
+twice the file's total active recording duration, and a protein-turnover
+half-life of `48` hours. This follows the photobleaching form of
 Qijun Tang's
 [`generateFiberPhotometryTraces.m`](https://github.com/qjtang12/Long-term_optical_monitoring_of_genetically-encoded_fluorescent_indicators/blob/73c5ba40b10c13b722b201ecf43aec5f74cdd227/generateFiberPhotometryTraces.m),
 while using Python's elapsed-time convention in which the first sample is at
@@ -261,20 +278,40 @@ photobleaching = SyntheticPhotobleachingConfig(
     model="double_exponential",
     isosbestic_components=(component(0.10, 60.0), component(0.15, 900.0)),
     calcium_components=(component(0.20, 45.0), component(0.30, 600.0)),
+    turnover_half_life_hours=48.0,
 )
 signal = SyntheticSignalConfig(photobleaching=photobleaching)
 ```
 
+Set `turnover_half_life_hours=None` to disable protein replacement. This makes
+`k_turnover = 0` and exactly recovers the cumulative single- or
+double-exponential photobleaching equations. Otherwise, the half-life must be
+finite and positive. The configured half-life and derived per-second rate are
+returned with the amplitudes and time constants in
+`SyntheticDoricSummary.photobleaching`.
+
+The first-order turnover model is motivated by measurements in neural cells:
+
+- [Local and global influences on protein turnover in neurons and glia](https://doi.org/10.7554/eLife.34202)
+  reports broad protein- and cell-type-dependent turnover behavior using
+  exponential rate estimates.
+- [Metabolic Turnover of Synaptic Proteins: Kinetics, Interdependencies and Implications for Synaptic Maintenance](https://doi.org/10.1371/journal.pone.0063191)
+  models synthesis-balanced degradation with exponential incorporation and
+  loss curves.
+
+These studies motivate the model form but show that neural protein half-lives
+vary substantially. The `48`-hour value is a modular simulator default, not a
+universal neural-protein estimate or a value asserted by either reference.
+
 Single exponential models use fewer parameters; double exponential models can
 represent separate fast and slow loss components. Which is appropriate depends
-on the experiment, so neither is universally preferred. Resolved model names,
-time basis, amplitudes, and time constants are returned in
-`SyntheticDoricSummary.photobleaching`.
+on the experiment, so neither is universally preferred.
 
 The older `bleaching_fraction` argument remains available temporarily. It emits
 `DeprecationWarning`, maps zero to no photobleaching, and maps positive values to
 a single exponential with that loss amplitude and the default time constant.
-It cannot be combined with a non-default `photobleaching` configuration.
+Legacy calls disable turnover to preserve their previous decay behavior. The
+field cannot be combined with a non-default `photobleaching` configuration.
 
 ### Signal artifacts
 

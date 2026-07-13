@@ -16,6 +16,7 @@ PhotobleachingModel = Literal[
 ]
 
 _TIME_BASIS = "cumulative_exposure_seconds"
+_DEFAULT_TURNOVER_HALF_LIFE_HOURS = 48.0
 _DOUBLE_FAST_TAU_SECONDS = -1.0 / math.log(0.98)
 _DOUBLE_SLOW_TAU_SECONDS = -1.0 / math.log(0.998)
 
@@ -42,12 +43,15 @@ class SyntheticPhotobleachingConfig:
 
     Component tuples may be omitted to use model-specific defaults. A single
     exponential requires one component per signal and a double exponential
-    requires two. The ``none`` model accepts no components.
+    requires two. The ``none`` model accepts no components. Protein turnover
+    uses a shared half-life for both wavelengths; set
+    ``turnover_half_life_hours`` to ``None`` to disable replacement.
     """
 
     model: PhotobleachingModel = "single_exponential"
     isosbestic_components: _ComponentTuple = None
     calcium_components: _ComponentTuple = None
+    turnover_half_life_hours: float | None = _DEFAULT_TURNOVER_HALF_LIFE_HOURS
 
 
 @dataclass(frozen=True)
@@ -56,8 +60,18 @@ class SyntheticPhotobleachingMetadata:
 
     model: PhotobleachingModel
     time_basis: str
+    turnover_half_life_hours: float | None
+    turnover_rate_per_second: float
     isosbestic_components: tuple[SyntheticPhotobleachingComponentConfig, ...]
     calcium_components: tuple[SyntheticPhotobleachingComponentConfig, ...]
+
+
+@dataclass(frozen=True)
+class _PhotobleachingFactors:
+    """Resolved factors with shape ``(series, samples)`` for both signals."""
+
+    isosbestic: np.ndarray
+    calcium: np.ndarray
 
 
 def resolve_photobleaching(
@@ -84,6 +98,10 @@ def resolve_photobleaching(
             "'double_exponential'"
         )
 
+    turnover_half_life_hours, turnover_rate_per_second = _resolve_turnover(
+        config.turnover_half_life_hours
+    )
+
     defaults = _default_components(config.model, active_duration_seconds)
     isosbestic = _resolve_components(
         config.isosbestic_components,
@@ -100,6 +118,8 @@ def resolve_photobleaching(
     return SyntheticPhotobleachingMetadata(
         model=config.model,
         time_basis=_TIME_BASIS,
+        turnover_half_life_hours=turnover_half_life_hours,
+        turnover_rate_per_second=turnover_rate_per_second,
         isosbestic_components=isosbestic,
         calcium_components=calcium,
     )
@@ -111,7 +131,7 @@ def photobleaching_factor(
     *,
     signal: Literal["isosbestic", "calcium"],
 ) -> np.ndarray:
-    """Evaluate a resolved photobleaching factor at exposure times."""
+    """Evaluate a resolved factor during uninterrupted illumination."""
 
     exposure_time = np.asarray(exposure_time_seconds, dtype=float)
     if np.any(~np.isfinite(exposure_time)) or np.any(exposure_time < 0):
@@ -124,6 +144,7 @@ def photobleaching_factor(
     else:
         raise ValueError("signal must be 'isosbestic' or 'calcium'")
     factor = np.ones_like(exposure_time, dtype=float)
+    turnover_rate = metadata.turnover_rate_per_second
     for component in components:
         amplitude = component.amplitude_fraction
         time_constant = component.time_constant_seconds
@@ -131,8 +152,53 @@ def photobleaching_factor(
             raise ValueError(
                 "photobleaching metadata contains an unresolved time constant"
             )
-        factor += amplitude * (np.exp(-exposure_time / time_constant) - 1.0)
+        bleaching_rate = 1.0 / time_constant
+        combined_rate = bleaching_rate + turnover_rate
+        steady_state = amplitude * turnover_rate / combined_rate
+        component_state = steady_state + (amplitude - steady_state) * np.exp(
+            -combined_rate * exposure_time
+        )
+        factor += component_state - amplitude
     return factor
+
+
+def build_photobleaching_factors(
+    metadata: SyntheticPhotobleachingMetadata,
+    *,
+    session_start_times_seconds: np.ndarray,
+    samples_per_series: int,
+    sampling_rate_hz: float,
+) -> _PhotobleachingFactors:
+    """Build factors while carrying renewable component pools across sessions."""
+
+    starts = np.asarray(session_start_times_seconds, dtype=float)
+    if starts.ndim != 1 or starts.size == 0:
+        raise ValueError("session_start_times_seconds must be a nonempty 1D array")
+    if np.any(~np.isfinite(starts)) or np.any(np.diff(starts) <= 0):
+        raise ValueError(
+            "session_start_times_seconds must be finite and strictly increasing"
+        )
+    if not isinstance(samples_per_series, int) or samples_per_series <= 0:
+        raise ValueError("samples_per_series must be a positive integer")
+    if not math.isfinite(sampling_rate_hz) or sampling_rate_hz <= 0:
+        raise ValueError("sampling_rate_hz must be finite and positive")
+
+    keyword_arguments = {
+        "turnover_rate_per_second": metadata.turnover_rate_per_second,
+        "session_start_times_seconds": starts,
+        "samples_per_series": samples_per_series,
+        "sampling_rate_hz": sampling_rate_hz,
+    }
+    return _PhotobleachingFactors(
+        isosbestic=_factor_schedule(
+            metadata.isosbestic_components,
+            **keyword_arguments,
+        ),
+        calcium=_factor_schedule(
+            metadata.calcium_components,
+            **keyword_arguments,
+        ),
+    )
 
 
 def _resolve_legacy_config(
@@ -158,7 +224,10 @@ def _resolve_legacy_config(
         stacklevel=5,
     )
     if legacy_bleaching_fraction == 0:
-        return SyntheticPhotobleachingConfig(model="none")
+        return SyntheticPhotobleachingConfig(
+            model="none",
+            turnover_half_life_hours=None,
+        )
 
     component = SyntheticPhotobleachingComponentConfig(
         amplitude_fraction=float(legacy_bleaching_fraction)
@@ -167,7 +236,92 @@ def _resolve_legacy_config(
         model="single_exponential",
         isosbestic_components=(component,),
         calcium_components=(component,),
+        turnover_half_life_hours=None,
     )
+
+
+def _resolve_turnover(
+    turnover_half_life_hours: float | None,
+) -> tuple[float | None, float]:
+    if turnover_half_life_hours is None:
+        return None, 0.0
+    if (
+        not math.isfinite(turnover_half_life_hours)
+        or turnover_half_life_hours <= 0
+    ):
+        raise ValueError("turnover_half_life_hours must be finite and positive")
+    resolved_half_life = float(turnover_half_life_hours)
+    rate_per_second = math.log(2.0) / (resolved_half_life * 3600.0)
+    return resolved_half_life, rate_per_second
+
+
+def _factor_schedule(
+    components: tuple[SyntheticPhotobleachingComponentConfig, ...],
+    *,
+    turnover_rate_per_second: float,
+    session_start_times_seconds: np.ndarray,
+    samples_per_series: int,
+    sampling_rate_hz: float,
+) -> np.ndarray:
+    series_count = session_start_times_seconds.size
+    factors = np.ones((series_count, samples_per_series), dtype=float)
+    if not components:
+        return factors
+
+    amplitudes = np.array(
+        [component.amplitude_fraction for component in components],
+        dtype=float,
+    )
+    bleaching_rates = np.array(
+        [
+            1.0 / _resolved_time_constant(component)
+            for component in components
+        ],
+        dtype=float,
+    )
+    combined_rates = bleaching_rates + turnover_rate_per_second
+    steady_states = amplitudes * turnover_rate_per_second / combined_rates
+    component_states = amplitudes.copy()
+    relative_time = np.arange(samples_per_series, dtype=float) / sampling_rate_hz
+    active_duration = samples_per_series / sampling_rate_hz
+    unbleachable_fraction = 1.0 - float(amplitudes.sum())
+
+    for series_index in range(series_count):
+        illuminated_states = steady_states[:, None] + (
+            component_states - steady_states
+        )[:, None] * np.exp(-combined_rates[:, None] * relative_time[None, :])
+        factors[series_index] = unbleachable_fraction + illuminated_states.sum(axis=0)
+
+        component_states = steady_states + (
+            component_states - steady_states
+        ) * np.exp(-combined_rates * active_duration)
+        if series_index + 1 == series_count:
+            continue
+
+        start_delta = (
+            session_start_times_seconds[series_index + 1]
+            - session_start_times_seconds[series_index]
+        )
+        dark_duration = start_delta - active_duration
+        rounding_tolerance = 0.5 / sampling_rate_hz + 1e-12
+        if dark_duration < -rounding_tolerance:
+            raise ValueError("session start times overlap active recording intervals")
+        dark_duration = max(0.0, dark_duration)
+        if turnover_rate_per_second > 0 and dark_duration > 0:
+            component_states = amplitudes + (
+                component_states - amplitudes
+            ) * np.exp(-turnover_rate_per_second * dark_duration)
+
+    return factors
+
+
+def _resolved_time_constant(
+    component: SyntheticPhotobleachingComponentConfig,
+) -> float:
+    time_constant = component.time_constant_seconds
+    if time_constant is None:  # Resolved metadata never contains ``None``.
+        raise ValueError("photobleaching metadata contains an unresolved time constant")
+    return time_constant
 
 
 def _default_components(

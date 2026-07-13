@@ -102,6 +102,55 @@ def _factor(
     return factor
 
 
+def _renewable_factor(
+    time_seconds: np.ndarray,
+    components: tuple[SyntheticPhotobleachingComponentConfig, ...],
+    turnover_rate_per_second: float,
+    *,
+    initial_states: np.ndarray | None = None,
+) -> np.ndarray:
+    amplitudes = np.array(
+        [component.amplitude_fraction for component in components]
+    )
+    states = amplitudes if initial_states is None else initial_states
+    factor = np.full_like(time_seconds, 1.0 - amplitudes.sum(), dtype=float)
+    for amplitude, initial_state, component in zip(
+        amplitudes,
+        states,
+        components,
+        strict=True,
+    ):
+        assert component.time_constant_seconds is not None
+        bleaching_rate = 1.0 / component.time_constant_seconds
+        combined_rate = bleaching_rate + turnover_rate_per_second
+        steady_state = amplitude * turnover_rate_per_second / combined_rate
+        factor += steady_state + (initial_state - steady_state) * np.exp(
+            -combined_rate * time_seconds
+        )
+    return factor
+
+
+def _state_after_illumination(
+    components: tuple[SyntheticPhotobleachingComponentConfig, ...],
+    turnover_rate_per_second: float,
+    duration_seconds: float,
+) -> np.ndarray:
+    states = []
+    for component in components:
+        assert component.time_constant_seconds is not None
+        amplitude = component.amplitude_fraction
+        bleaching_rate = 1.0 / component.time_constant_seconds
+        combined_rate = bleaching_rate + turnover_rate_per_second
+        steady_state = amplitude * turnover_rate_per_second / combined_rate
+        states.append(
+            steady_state
+            + (amplitude - steady_state) * np.exp(
+                -combined_rate * duration_seconds
+            )
+        )
+    return np.array(states)
+
+
 def test_single_exponential_uses_cumulative_exposure_time_and_signal_parameters(
     tmp_path,
 ) -> None:
@@ -110,6 +159,7 @@ def test_single_exponential_uses_cumulative_exposure_time_and_signal_parameters(
         model="single_exponential",
         isosbestic_components=(_component(0.25, 8.0),),
         calcium_components=(_component(0.60, 20.0),),
+        turnover_half_life_hours=None,
     )
     config = _config(
         _signal(photobleaching, channel_baseline_step=0.01),
@@ -154,10 +204,37 @@ def test_default_single_exponential_resolves_matlab_style_time_constant(
     assert metadata.isosbestic_components == metadata.calcium_components
     assert metadata.isosbestic_components[0].amplitude_fraction == 1.0
     assert metadata.isosbestic_components[0].time_constant_seconds == 48.0
-    exposure_time = np.arange(48, dtype=float) / config.fs
+    assert metadata.turnover_half_life_hours == 48.0
+    assert metadata.turnover_rate_per_second == pytest.approx(
+        math.log(2.0) / (48.0 * 3600.0)
+    )
+    relative_time = np.arange(24, dtype=float) / config.fs
+    components = metadata.isosbestic_components
+    first_series = _renewable_factor(
+        relative_time,
+        components,
+        metadata.turnover_rate_per_second,
+    )
+    state_after_active = _state_after_illumination(
+        components,
+        metadata.turnover_rate_per_second,
+        config.session_duration_seconds,
+    )
+    amplitudes = np.array(
+        [component.amplitude_fraction for component in components]
+    )
+    second_initial_state = amplitudes + (state_after_active - amplitudes) * np.exp(
+        -metadata.turnover_rate_per_second * config.inter_series_gap_seconds
+    )
+    second_series = _renewable_factor(
+        relative_time,
+        components,
+        metadata.turnover_rate_per_second,
+        initial_states=second_initial_state,
+    )
     np.testing.assert_allclose(
         _read_signal(path, 1),
-        0.08 * np.exp(-exposure_time / 48.0),
+        0.08 * np.concatenate((first_series, second_series)),
     )
 
 
@@ -169,6 +246,7 @@ def test_double_exponential_matches_defining_equation_for_each_signal(
         model="double_exponential",
         isosbestic_components=(_component(0.10, 5.0), _component(0.20, 50.0)),
         calcium_components=(_component(0.30, 10.0), _component(0.40, 100.0)),
+        turnover_half_life_hours=None,
     )
     config = _config(_signal(photobleaching))
 
@@ -185,6 +263,86 @@ def test_double_exponential_matches_defining_equation_for_each_signal(
         0.18 * _factor(exposure_time, metadata.calcium_components),
     )
     assert metadata.model == "double_exponential"
+
+
+def test_double_exponential_turnover_matches_continuous_analytical_solution(
+    tmp_path,
+) -> None:
+    path = tmp_path / "double_turnover.doric"
+    photobleaching = SyntheticPhotobleachingConfig(
+        model="double_exponential",
+        isosbestic_components=(_component(0.15, 4.0), _component(0.25, 40.0)),
+        calcium_components=(_component(0.20, 8.0), _component(0.30, 80.0)),
+        turnover_half_life_hours=0.01,
+    )
+    config = _config(_signal(photobleaching), series_count=1)
+
+    summary = generate_synthetic_doric(path, config)
+
+    time = np.arange(summary.samples_per_series, dtype=float) / config.fs
+    metadata = summary.photobleaching
+    np.testing.assert_allclose(
+        _read_signal(path, 1),
+        0.08
+        * _renewable_factor(
+            time,
+            metadata.isosbestic_components,
+            metadata.turnover_rate_per_second,
+        ),
+    )
+    np.testing.assert_allclose(
+        _read_signal(path, 2),
+        0.18
+        * _renewable_factor(
+            time,
+            metadata.calcium_components,
+            metadata.turnover_rate_per_second,
+        ),
+    )
+
+
+def test_turnover_recovers_bleachable_pool_during_inter_session_gap(
+    tmp_path,
+) -> None:
+    path = tmp_path / "gap_recovery.doric"
+    component = _component(0.75, 6.0)
+    photobleaching = SyntheticPhotobleachingConfig(
+        isosbestic_components=(component,),
+        calcium_components=(component,),
+        turnover_half_life_hours=1.0,
+    )
+    config = _config(
+        _signal(photobleaching),
+        inter_series_gap_seconds=3600.0,
+    )
+
+    summary = generate_synthetic_doric(path, config)
+
+    metadata = summary.photobleaching
+    relative_time = np.arange(summary.samples_per_series, dtype=float) / config.fs
+    first_series = _renewable_factor(
+        relative_time,
+        metadata.isosbestic_components,
+        metadata.turnover_rate_per_second,
+    )
+    state_after_active = _state_after_illumination(
+        metadata.isosbestic_components,
+        metadata.turnover_rate_per_second,
+        summary.samples_per_series / config.fs,
+    )
+    amplitude = np.array([component.amplitude_fraction])
+    recovered_state = amplitude + (state_after_active - amplitude) * np.exp(
+        -metadata.turnover_rate_per_second * config.inter_series_gap_seconds
+    )
+    second_series = _renewable_factor(
+        relative_time,
+        metadata.isosbestic_components,
+        metadata.turnover_rate_per_second,
+        initial_states=recovered_state,
+    )
+    expected = np.concatenate((first_series, second_series))
+    np.testing.assert_allclose(_read_signal(path, 1), 0.08 * expected)
+    assert second_series[0] > first_series[-1]
 
 
 def test_double_exponential_defaults_match_regression_sim_reference(tmp_path) -> None:
@@ -214,6 +372,7 @@ def test_none_model_leaves_slow_baselines_flat(tmp_path) -> None:
     np.testing.assert_allclose(_read_signal(path, 1), 0.08)
     np.testing.assert_allclose(_read_signal(path, 2), 0.18)
     assert summary.photobleaching.model == "none"
+    assert summary.photobleaching.turnover_half_life_hours == 48.0
     assert summary.photobleaching.isosbestic_components == ()
     assert summary.photobleaching.calcium_components == ()
 
@@ -226,6 +385,7 @@ def test_photobleaching_attenuates_tonic_but_not_phasic_components(
         model="single_exponential",
         isosbestic_components=(_component(0.0, 10.0),),
         calcium_components=(_component(0.5, 10.0),),
+        turnover_half_life_hours=None,
     )
     signal = add_tonic_component(
         _signal(photobleaching),
@@ -325,7 +485,9 @@ def test_model_selection_does_not_change_seeded_noise_draws(tmp_path) -> None:
     )
     single_signal = replace(
         none_signal,
-        photobleaching=SyntheticPhotobleachingConfig(),
+        photobleaching=SyntheticPhotobleachingConfig(
+            turnover_half_life_hours=None
+        ),
     )
 
     generate_synthetic_doric(none_path, _config(none_signal))
@@ -341,6 +503,54 @@ def test_model_selection_does_not_change_seeded_noise_draws(tmp_path) -> None:
     np.testing.assert_allclose(
         _read_signal(none_path, 2) - 0.18,
         _read_signal(single_path, 2) - 0.18 * decay_factor,
+    )
+
+
+def test_turnover_selection_does_not_change_seeded_noise_draws(tmp_path) -> None:
+    no_turnover_path = tmp_path / "no_turnover_noise.doric"
+    turnover_path = tmp_path / "turnover_noise.doric"
+    component = _component(0.6, 10.0)
+    no_turnover = SyntheticPhotobleachingConfig(
+        isosbestic_components=(component,),
+        calcium_components=(component,),
+        turnover_half_life_hours=None,
+    )
+    with_turnover = replace(no_turnover, turnover_half_life_hours=0.01)
+    no_turnover_signal = _signal(
+        no_turnover,
+        noise_std=0.01,
+        analog_noise_std=0.02,
+    )
+    turnover_signal = replace(
+        no_turnover_signal,
+        photobleaching=with_turnover,
+    )
+    no_turnover_config = _config(no_turnover_signal, series_count=1)
+    turnover_config = _config(turnover_signal, series_count=1)
+
+    no_turnover_summary = generate_synthetic_doric(
+        no_turnover_path,
+        no_turnover_config,
+    )
+    turnover_summary = generate_synthetic_doric(turnover_path, turnover_config)
+
+    time = np.arange(no_turnover_summary.samples_per_series) / no_turnover_config.fs
+    no_turnover_factor = _factor(
+        time,
+        no_turnover_summary.photobleaching.isosbestic_components,
+    )
+    turnover_factor = _renewable_factor(
+        time,
+        turnover_summary.photobleaching.isosbestic_components,
+        turnover_summary.photobleaching.turnover_rate_per_second,
+    )
+    np.testing.assert_allclose(
+        _read_signal(no_turnover_path, 1) - 0.08 * no_turnover_factor,
+        _read_signal(turnover_path, 1) - 0.08 * turnover_factor,
+    )
+    np.testing.assert_allclose(
+        _read_signal(no_turnover_path, 2) - 0.18 * no_turnover_factor,
+        _read_signal(turnover_path, 2) - 0.18 * turnover_factor,
     )
 
 
@@ -368,6 +578,8 @@ def test_legacy_bleaching_fraction_warns_and_maps_to_new_models(
             summary.photobleaching.isosbestic_components[0].time_constant_seconds
             == 48.0
         )
+    assert summary.photobleaching.turnover_half_life_hours is None
+    assert summary.photobleaching.turnover_rate_per_second == 0.0
 
 
 @pytest.mark.parametrize("fraction", [-0.1, 1.0, float("nan")])
@@ -433,6 +645,22 @@ def test_invalid_legacy_bleaching_fraction_is_rejected(
                 ),
             ),
             "sum to at most 1",
+        ),
+        (
+            SyntheticPhotobleachingConfig(turnover_half_life_hours=0.0),
+            "turnover_half_life_hours",
+        ),
+        (
+            SyntheticPhotobleachingConfig(turnover_half_life_hours=-1.0),
+            "turnover_half_life_hours",
+        ),
+        (
+            SyntheticPhotobleachingConfig(turnover_half_life_hours=float("nan")),
+            "turnover_half_life_hours",
+        ),
+        (
+            SyntheticPhotobleachingConfig(turnover_half_life_hours=float("inf")),
+            "turnover_half_life_hours",
         ),
     ],
 )

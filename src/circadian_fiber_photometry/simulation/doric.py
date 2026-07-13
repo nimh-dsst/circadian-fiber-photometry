@@ -24,7 +24,8 @@ from .artifact.models import (
 from .photobleaching import (
     SyntheticPhotobleachingConfig,
     SyntheticPhotobleachingMetadata,
-    photobleaching_factor,
+    _PhotobleachingFactors,
+    build_photobleaching_factors,
     resolve_photobleaching,
 )
 
@@ -337,6 +338,12 @@ def generate_synthetic_doric(
         ],
         dtype=float,
     )
+    photobleaching_factors = build_photobleaching_factors(
+        validated.photobleaching,
+        session_start_times_seconds=session_start_times,
+        samples_per_series=validated.samples_per_series,
+        sampling_rate_hz=config.fs,
+    )
     ttl_schedule = _build_ttl_schedule(config, validated, session_start_times)
     artifact_schedule = build_artifact_schedule(
         session_start_spike=config.signal.session_start_spike,
@@ -376,6 +383,7 @@ def generate_synthetic_doric(
                     series_index,
                     channel_index,
                     artifact_schedule,
+                    photobleaching_factors,
                 )
                 key = (series_index + 1, channel_index + 1)
                 event_sample_indices[key] = generated.event_indices
@@ -851,23 +859,13 @@ def _generate_channel_signals(
     series_index: int,
     channel_index: int,
     artifact_schedule: ArtifactSchedule,
+    photobleaching_factors: _PhotobleachingFactors,
 ) -> _GeneratedChannel:
     signal = config.signal
     samples = validated.samples_per_series
     relative_time = np.arange(samples, dtype=float) / config.fs
-    exposure_time = (
-        series_index * validated.samples_per_series + np.arange(samples, dtype=float)
-    ) / config.fs
-    isosbestic_bleaching = photobleaching_factor(
-        validated.photobleaching,
-        exposure_time,
-        signal="isosbestic",
-    )
-    calcium_bleaching = photobleaching_factor(
-        validated.photobleaching,
-        exposure_time,
-        signal="calcium",
-    )
+    isosbestic_bleaching = photobleaching_factors.isosbestic[series_index]
+    calcium_bleaching = photobleaching_factors.calcium[series_index]
     channel_phase = 0.7 * channel_index
     session_phase = 2 * np.pi * absolute_time[0] / 86400 + channel_phase
 

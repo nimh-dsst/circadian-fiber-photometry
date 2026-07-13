@@ -111,6 +111,10 @@ Copy this line for each new request:
   photobleaching without changing other signal-generation behavior. Document
   the model equations, units, defaults, and tradeoffs without presenting either
   exponential model as universally preferred.
+- [x] **Protein turnover during photobleaching** — Replenish bleached indicator
+  with configurable first-order protein turnover during active recordings and
+  inter-session gaps. Default to a 48-hour half-life, preserve a no-turnover
+  option, and report the resolved half-life and rate in simulator metadata.
 - [ ] **Optional flat interval shape** — Add a non-default sample-and-hold mode
   modeled after
   [`generateFiberPhotometryTraces.m` lines 49-62](https://github.com/qjtang12/Long-term_optical_monitoring_of_genetically-encoded_fluorescent_indicators/blob/73c5ba40b10c13b722b201ecf43aec5f74cdd227/generateFiberPhotometryTraces.m#L49-L62).
