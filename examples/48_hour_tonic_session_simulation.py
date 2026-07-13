@@ -45,6 +45,7 @@ def _():
     from circadian_fiber_photometry import load_doric
     from circadian_fiber_photometry.simulation import (
         SyntheticDoricConfig,
+        SyntheticPhotobleachingConfig,
         SyntheticSignalConfig,
         SyntheticTTLBehaviorCodeConfig,
         SyntheticTTLBehaviorEventConfig,
@@ -56,6 +57,7 @@ def _():
     notebook_dir = Path(__file__).resolve().parent
     return (
         SyntheticDoricConfig,
+        SyntheticPhotobleachingConfig,
         SyntheticSignalConfig,
         SyntheticTTLBehaviorCodeConfig,
         SyntheticTTLBehaviorEventConfig,
@@ -123,6 +125,7 @@ def _(np):
 @app.cell
 def _(
     SyntheticDoricConfig,
+    SyntheticPhotobleachingConfig,
     SyntheticSignalConfig,
     SyntheticTTLBehaviorCodeConfig,
     SyntheticTTLBehaviorEventConfig,
@@ -143,7 +146,7 @@ def _(
     ttl_pulse_width_seconds,
 ):
     base_signal = SyntheticSignalConfig(
-        bleaching_fraction=0.0,
+        photobleaching=SyntheticPhotobleachingConfig(model="none"),
         artifact_amplitude=0.0,
         circadian_amplitude=0.0,
         noise_std=0.0,

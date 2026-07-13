@@ -9,6 +9,7 @@ from circadian_fiber_photometry import (
 )
 from circadian_fiber_photometry.simulation import (
     SyntheticDoricConfig,
+    SyntheticPhotobleachingConfig,
     SyntheticSignalConfig,
     SyntheticTTLBehaviorCodeConfig,
     SyntheticTTLBehaviorEventConfig,
@@ -39,7 +40,7 @@ def _flat_signal_config(**overrides: object) -> SyntheticSignalConfig:
         "isosbestic_baseline": 0.08,
         "calcium_baseline": 0.18,
         "channel_baseline_step": 0.0,
-        "bleaching_fraction": 0.0,
+        "photobleaching": SyntheticPhotobleachingConfig(model="none"),
         "artifact_amplitude": 0.0,
         "circadian_amplitude": 0.0,
         "noise_std": 0.0,
@@ -166,8 +167,7 @@ def test_generate_synthetic_doric_applies_configured_tonic_component(
         "AIN01xAOUT02-LockIn/Values",
     )
     time = np.arange(calcium_channel_1.size, dtype=float) / config.fs
-    isosbestic = 0.08 * (1 - 0.015 * (time / time[-1]))
-    baseline = 0.18 + 1.25 * (isosbestic - 0.08)
+    baseline = np.full(time.size, 0.18)
     expected = baseline + 0.02 * np.sin(2 * np.pi * 0.25 * time)
 
     np.testing.assert_allclose(calcium_channel_1, expected)
@@ -202,9 +202,7 @@ def test_generate_synthetic_doric_applies_scheduled_calcium_events_with_default_
     tail_time = np.arange(calcium.size - event_sample, dtype=float) / config.fs
     kernel = (1 - np.exp(-9.0 * tail_time)) * np.exp(-1.0 * tail_time)
     kernel = kernel / np.max(kernel)
-    time = np.arange(calcium.size, dtype=float) / config.fs
-    isosbestic = 0.08 * (1 - 0.015 * (time / time[-1]))
-    baseline = 0.18 + 1.25 * (isosbestic - 0.08)
+    baseline = np.full(calcium.size, 0.18)
 
     np.testing.assert_allclose(
         calcium[event_sample : event_sample + 40],

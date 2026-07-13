@@ -111,6 +111,7 @@ mirror the Doric FPConsole hierarchy used by the legacy MATLAB readers:
 ```python
 from circadian_fiber_photometry.simulation import (
     SyntheticDoricConfig,
+    SyntheticPhotobleachingConfig,
     SyntheticSignalConfig,
     SyntheticTTLBehaviorCodeConfig,
     SyntheticTTLBehaviorEventConfig,
@@ -124,7 +125,9 @@ from circadian_fiber_photometry.simulation import (
     generate_synthetic_doric,
 )
 
-signal = SyntheticSignalConfig()
+signal = SyntheticSignalConfig(
+    photobleaching=SyntheticPhotobleachingConfig(model="single_exponential")
+)
 signal = add_tonic_component(
     signal,
     amplitude=0.012,
@@ -209,6 +212,69 @@ result = run_analysis(dataset, analysis="phasic", config={"interval_hours": 0.5}
 Tonic components are additive calcium-channel sinusoids with amplitude and
 frequency controls. Scheduled calcium events use seconds relative to each
 series start; random calcium events are seeded from `SyntheticDoricConfig.seed`.
+
+### Photobleaching
+
+Photobleaching is configured independently for the 405 nm isosbestic and
+465 nm calcium baselines. Callers select `"none"`, `"single_exponential"`, or
+`"double_exponential"` through `SyntheticPhotobleachingConfig`. For a signal
+with exponential components `(A_i, tau_i)`, the multiplicative baseline factor
+is
+
+```text
+B(t) = 1 - sum(A_i) + sum(A_i * exp(-t / tau_i))
+```
+
+`A_i` is a unitless long-run fractional loss and `tau_i` is a time constant in
+seconds. Amplitudes must each be in `[0, 1]`, their sum cannot exceed `1`, and
+time constants must be positive. The exposure clock begins at zero, advances
+through recorded samples, and pauses during gaps between sessions. The first
+sample therefore has `B(0) = 1`.
+
+The default is a single exponential with amplitude `1` and a time constant of
+twice the file's total active recording duration. This follows the form of
+Qijun Tang's
+[`generateFiberPhotometryTraces.m`](https://github.com/qjtang12/Long-term_optical_monitoring_of_genetically-encoded_fluorescent_indicators/blob/73c5ba40b10c13b722b201ecf43aec5f74cdd227/generateFiberPhotometryTraces.m),
+while using Python's elapsed-time convention in which the first sample is at
+zero.
+
+The default double exponential has two `0.20` loss components with time
+constants `-1/log(0.98)` and `-1/log(0.998)` seconds (about `49.5` and `499.5`
+seconds). These defaults are derived from the fiber-photometry
+[`RegressionSim` simulation](https://github.com/philjrdb/RegressionSim/blob/main/dFF_simulation.m)
+and its
+[`double_exp_decay.m`](https://github.com/philjrdb/RegressionSim/blob/main/double_exp_decay.m)
+function. This identified reference defines the defaults; it is not a claim of
+equivalence to the preserved MATLAB analysis scripts in this repository.
+
+Use separate component tuples to configure each wavelength:
+
+```python
+from circadian_fiber_photometry.simulation import (
+    SyntheticPhotobleachingComponentConfig,
+    SyntheticPhotobleachingConfig,
+    SyntheticSignalConfig,
+)
+
+component = SyntheticPhotobleachingComponentConfig
+photobleaching = SyntheticPhotobleachingConfig(
+    model="double_exponential",
+    isosbestic_components=(component(0.10, 60.0), component(0.15, 900.0)),
+    calcium_components=(component(0.20, 45.0), component(0.30, 600.0)),
+)
+signal = SyntheticSignalConfig(photobleaching=photobleaching)
+```
+
+Single exponential models use fewer parameters; double exponential models can
+represent separate fast and slow loss components. Which is appropriate depends
+on the experiment, so neither is universally preferred. Resolved model names,
+time basis, amplitudes, and time constants are returned in
+`SyntheticDoricSummary.photobleaching`.
+
+The older `bleaching_fraction` argument remains available temporarily. It emits
+`DeprecationWarning`, maps zero to no photobleaching, and maps positive values to
+a single exponential with that loss amplitude and the default time constant.
+It cannot be combined with a non-default `photobleaching` configuration.
 
 ### Signal artifacts
 

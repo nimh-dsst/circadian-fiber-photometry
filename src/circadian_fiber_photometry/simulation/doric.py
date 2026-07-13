@@ -21,6 +21,12 @@ from .artifact.models import (
     SyntheticScheduledBoxArtifactConfig,
     SyntheticSessionStartSpikeConfig,
 )
+from .photobleaching import (
+    SyntheticPhotobleachingConfig,
+    SyntheticPhotobleachingMetadata,
+    photobleaching_factor,
+    resolve_photobleaching,
+)
 
 
 @dataclass(frozen=True)
@@ -80,7 +86,7 @@ class SyntheticSignalConfig:
     isosbestic_baseline: float = 0.08
     calcium_baseline: float = 0.18
     channel_baseline_step: float = 0.006
-    bleaching_fraction: float = 0.20
+    bleaching_fraction: float | None = None
     artifact_amplitude: float = 0.004
     circadian_amplitude: float = 0.012
     noise_std: float = 0.0015
@@ -96,6 +102,9 @@ class SyntheticSignalConfig:
     session_start_spike: SyntheticSessionStartSpikeConfig | None = None
     scheduled_box_artifacts: tuple[SyntheticScheduledBoxArtifactConfig, ...] = ()
     random_box_artifacts: tuple[SyntheticRandomBoxArtifactConfig, ...] = ()
+    photobleaching: SyntheticPhotobleachingConfig = field(
+        default_factory=SyntheticPhotobleachingConfig
+    )
 
 
 def add_tonic_component(
@@ -291,6 +300,7 @@ class SyntheticDoricSummary:
     ttl_pulse_sample_indices: dict[tuple[int, int], np.ndarray]
     ttl_pulse_times_seconds: dict[tuple[int, int], np.ndarray]
     ttl_behavior_events: tuple[SyntheticTTLBehaviorEventSummary, ...]
+    photobleaching: SyntheticPhotobleachingMetadata
     artifact_occurrences: tuple[SyntheticArtifactOccurrence, ...] = ()
 
 
@@ -441,6 +451,7 @@ def generate_synthetic_doric(
         ttl_pulse_sample_indices=ttl_schedule.pulse_sample_indices,
         ttl_pulse_times_seconds=ttl_schedule.pulse_times_seconds,
         ttl_behavior_events=ttl_schedule.behavior_events,
+        photobleaching=validated.photobleaching,
         artifact_occurrences=tuple(
             sorted(
                 artifact_occurrences,
@@ -478,6 +489,7 @@ class _ValidatedConfig:
     configured_series_count: int
     samples_per_series: int
     crop_samples: int
+    photobleaching: SyntheticPhotobleachingMetadata
 
     @classmethod
     def from_config(cls, config: SyntheticDoricConfig) -> _ValidatedConfig:
@@ -523,10 +535,18 @@ class _ValidatedConfig:
             )
 
         _validate_signal_config(config.signal, config)
+        photobleaching = resolve_photobleaching(
+            config.signal.photobleaching,
+            active_duration_seconds=(
+                config.series_count * samples_per_series / config.fs
+            ),
+            legacy_bleaching_fraction=config.signal.bleaching_fraction,
+        )
         return cls(
             configured_series_count=configured_series_count,
             samples_per_series=samples_per_series,
             crop_samples=crop_samples,
+            photobleaching=photobleaching,
         )
 
 
@@ -835,8 +855,19 @@ def _generate_channel_signals(
     signal = config.signal
     samples = validated.samples_per_series
     relative_time = np.arange(samples, dtype=float) / config.fs
-    total_series = max(config.series_count - 1, 1)
-    experiment_progress = series_index / total_series
+    exposure_time = (
+        series_index * validated.samples_per_series + np.arange(samples, dtype=float)
+    ) / config.fs
+    isosbestic_bleaching = photobleaching_factor(
+        validated.photobleaching,
+        exposure_time,
+        signal="isosbestic",
+    )
+    calcium_bleaching = photobleaching_factor(
+        validated.photobleaching,
+        exposure_time,
+        signal="calcium",
+    )
     channel_phase = 0.7 * channel_index
     session_phase = 2 * np.pi * absolute_time[0] / 86400 + channel_phase
 
@@ -846,8 +877,6 @@ def _generate_channel_signals(
     base_465 = signal.calcium_baseline + (
         signal.channel_baseline_step * channel_index * 1.6
     )
-    bleaching = 1 - signal.bleaching_fraction * experiment_progress
-    within_session_bleach = 1 - 0.015 * (relative_time / relative_time[-1])
     artifact = signal.artifact_amplitude * np.sin(
         2 * np.pi * 0.07 * relative_time + session_phase
     )
@@ -855,7 +884,8 @@ def _generate_channel_signals(
         2 * np.pi * 0.011 * relative_time + channel_phase
     )
     noise_405 = rng.normal(0.0, signal.noise_std, samples)
-    isosbestic = (base_405 * bleaching * within_session_bleach) + artifact + drift
+    bleached_base_405 = base_405 * isosbestic_bleaching
+    isosbestic = bleached_base_405 + artifact + drift
     isosbestic = isosbestic + noise_405 + _gaussian_noise_trace(
         rng,
         signal.gaussian_noise,
@@ -900,10 +930,8 @@ def _generate_channel_signals(
         samples,
     )
     calcium = (
-        base_465
-        + 1.25 * (isosbestic - base_405)
-        + circadian
-        + tonic_signal
+        (base_465 + circadian + tonic_signal) * calcium_bleaching
+        + 1.25 * (isosbestic - bleached_base_405)
         + transient_signal
         + noise_465
     )
@@ -1648,8 +1676,6 @@ def _validate_signal_config(
     _require_positive_number(signal.isosbestic_baseline, "isosbestic_baseline")
     _require_positive_number(signal.calcium_baseline, "calcium_baseline")
     _require_nonnegative_number(signal.channel_baseline_step, "channel_baseline_step")
-    if not 0 <= signal.bleaching_fraction < 1:
-        raise ValueError("bleaching_fraction must be in [0, 1)")
     _require_nonnegative_number(signal.artifact_amplitude, "artifact_amplitude")
     _require_nonnegative_number(signal.circadian_amplitude, "circadian_amplitude")
     _require_nonnegative_number(signal.noise_std, "noise_std")

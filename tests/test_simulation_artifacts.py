@@ -10,6 +10,7 @@ import pytest
 from circadian_fiber_photometry.simulation import (
     SyntheticArtifactOccurrence,
     SyntheticDoricConfig,
+    SyntheticPhotobleachingConfig,
     SyntheticRandomBoxArtifactConfig,
     SyntheticScheduledBoxArtifactConfig,
     SyntheticSessionStartSpikeConfig,
@@ -36,7 +37,7 @@ from circadian_fiber_photometry.simulation.artifact import (
 def _flat_signal() -> SyntheticSignalConfig:
     return SyntheticSignalConfig(
         channel_baseline_step=0.0,
-        bleaching_fraction=0.0,
+        photobleaching=SyntheticPhotobleachingConfig(model="none"),
         artifact_amplitude=0.0,
         circadian_amplitude=0.0,
         noise_std=0.0,

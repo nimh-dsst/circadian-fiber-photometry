@@ -14,7 +14,7 @@ once their scope is clear.
   request.
 - Add an issue or pull-request link to an item when one exists.
 
-Last reviewed: **2026-07-10**. At that review, `uv run pytest` passed all 76
+Last reviewed: **2026-07-13**. At that review, `uv run pytest` passed all 99
 tests and `uv run ruff check .` passed.
 
 ## Feature request inbox
@@ -96,17 +96,17 @@ Copy this line for each new request:
   configurable counts or rates, time windows, durations, channels, and series.
   Reuse the signed-amplitude behavior of scheduled box artifacts and return
   their ground-truth locations and parameters.
-- [ ] **Single-exponential photobleaching** — Replace the current linear
+- [x] **Single-exponential photobleaching** — Replace the current linear
   across-session and within-session bleaching factors with configurable
   single-exponential decay for both calcium and isosbestic signals. Preserve the
   selected amplitude and time constant in simulator metadata and test generated
   traces against the defining equation.
-- [ ] **Double-exponential photobleaching** — Support configurable
+- [x] **Double-exponential photobleaching** — Support configurable
   double-exponential decay for both calcium and isosbestic signals, with
   independently configurable component amplitudes and time constants. Preserve
   all parameters in simulator metadata and test generated traces against the
   defining equation.
-- [ ] **Selectable photobleaching model** — Let callers explicitly select no
+- [x] **Selectable photobleaching model** — Let callers explicitly select no
   photobleaching, single-exponential photobleaching, or double-exponential
   photobleaching without changing other signal-generation behavior. Document
   the model equations, units, defaults, and tradeoffs without presenting either

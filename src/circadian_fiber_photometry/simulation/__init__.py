@@ -27,12 +27,20 @@ from .doric import (
     add_tonic_component,
     generate_synthetic_doric,
 )
+from .photobleaching import (
+    SyntheticPhotobleachingComponentConfig,
+    SyntheticPhotobleachingConfig,
+    SyntheticPhotobleachingMetadata,
+)
 
 __all__ = [
     "SyntheticArtifactOccurrence",
     "SyntheticDoricConfig",
     "SyntheticDoricSummary",
     "SyntheticGaussianNoiseConfig",
+    "SyntheticPhotobleachingComponentConfig",
+    "SyntheticPhotobleachingConfig",
+    "SyntheticPhotobleachingMetadata",
     "SyntheticRandomBoxArtifactConfig",
     "SyntheticRandomCalciumEventConfig",
     "SyntheticScheduledBoxArtifactConfig",

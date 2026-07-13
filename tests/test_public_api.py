@@ -12,6 +12,9 @@ from circadian_fiber_photometry.analyses.phasic import count_events
 from circadian_fiber_photometry.analyses.tonic import compute_tonic_level
 from circadian_fiber_photometry.simulation import (
     SyntheticGaussianNoiseConfig,
+    SyntheticPhotobleachingComponentConfig,
+    SyntheticPhotobleachingConfig,
+    SyntheticPhotobleachingMetadata,
     SyntheticRandomCalciumEventConfig,
     SyntheticScheduledCalciumEventConfig,
     SyntheticTonicComponentConfig,
@@ -32,6 +35,15 @@ def test_public_reorganized_imports_are_available() -> None:
     assert callable(compute_tonic_level)
     assert callable(generate_synthetic_doric)
     assert SyntheticGaussianNoiseConfig.__name__ == "SyntheticGaussianNoiseConfig"
+    assert (
+        SyntheticPhotobleachingComponentConfig.__name__
+        == "SyntheticPhotobleachingComponentConfig"
+    )
+    assert SyntheticPhotobleachingConfig.__name__ == "SyntheticPhotobleachingConfig"
+    assert (
+        SyntheticPhotobleachingMetadata.__name__
+        == "SyntheticPhotobleachingMetadata"
+    )
     assert (
         SyntheticRandomCalciumEventConfig.__name__
         == "SyntheticRandomCalciumEventConfig"
