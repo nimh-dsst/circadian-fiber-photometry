@@ -118,7 +118,10 @@ def _(
     simulation_summaries = {}
     traces = {}
 
-    for generation_model_name, generation_photobleaching in model_configs.items():
+    for (
+        generation_model_name,
+        generation_photobleaching,
+    ) in model_configs.items():
         generation_signal = SyntheticSignalConfig(
             channel_baseline_step=0.0,
             photobleaching=generation_photobleaching,
@@ -146,20 +149,24 @@ def _(
         generation_dataset = load_doric(generation_path)
         simulation_summaries[generation_model_name] = generation_summary
         traces[generation_model_name] = {
-            "isosbestic": generation_dataset.isosbestic_405[:, 0, :]
-            .T.reshape(-1),
+            "isosbestic": generation_dataset.isosbestic_405[:, 0, :].T.reshape(
+                -1
+            ),
             "calcium": generation_dataset.calcium_465[:, 0, :].T.reshape(-1),
         }
 
     reference_summary = simulation_summaries["no photobleaching"]
     samples_per_series = reference_summary.samples_per_series
-    wall_clock_hours = np.concatenate(
-        [
-            generation_series_start
-            + np.arange(samples_per_series, dtype=float) / fs
-            for generation_series_start in reference_summary.session_start_times
-        ]
-    ) / 3600.0
+    wall_clock_hours = (
+        np.concatenate(
+            [
+                generation_series_start
+                + np.arange(samples_per_series, dtype=float) / fs
+                for generation_series_start in reference_summary.session_start_times
+            ]
+        )
+        / 3600.0
+    )
     session_duration_hours = samples_per_series / fs / 3600.0
     light_intervals_hours = tuple(
         (
@@ -177,15 +184,14 @@ def _(
     )
     timeline_start_hours = light_intervals_hours[0][0]
     timeline_end_hours = light_intervals_hours[-1][1]
-    timeline_padding_hours = 0.05 * (
-        timeline_end_hours - timeline_start_hours
-    )
+    timeline_padding_hours = 0.2 * (timeline_end_hours - timeline_start_hours)
     timeline_range_hours = (
         timeline_start_hours - timeline_padding_hours,
         timeline_end_hours + timeline_padding_hours,
     )
     assert (
-        simulation_summaries["no photobleaching"].photobleaching.model == "none"
+        simulation_summaries["no photobleaching"].photobleaching.model
+        == "none"
     )
     assert (
         simulation_summaries["48 h turnover"].photobleaching.model
@@ -196,13 +202,15 @@ def _(
         == "double_exponential"
     )
     assert (
-        simulation_summaries["turnover disabled"]
-        .photobleaching.turnover_half_life_hours
+        simulation_summaries[
+            "turnover disabled"
+        ].photobleaching.turnover_half_life_hours
         is None
     )
     assert (
-        simulation_summaries["48 h turnover"]
-        .photobleaching.turnover_half_life_hours
+        simulation_summaries[
+            "48 h turnover"
+        ].photobleaching.turnover_half_life_hours
         == 48.0
     )
     np.testing.assert_allclose(traces["no photobleaching"]["isosbestic"], 0.08)
@@ -286,7 +294,9 @@ def _(
         yaxis_title="Normalized calcium baseline",
         legend_title_text="Model",
     )
-    comparison_figure.update_xaxes(range=timeline_range_hours)
+    comparison_figure = comparison_figure.update_xaxes(
+        range=timeline_range_hours
+    )
     return (comparison_figure,)
 
 
@@ -316,10 +326,12 @@ def _(simulation_summaries):
                     for item in metadata.isosbestic_components
                 ],
                 "calcium amplitudes": [
-                    item.amplitude_fraction for item in metadata.calcium_components
+                    item.amplitude_fraction
+                    for item in metadata.calcium_components
                 ],
                 "calcium taus (s)": [
-                    item.time_constant_seconds for item in metadata.calcium_components
+                    item.time_constant_seconds
+                    for item in metadata.calcium_components
                 ],
             }
         )
