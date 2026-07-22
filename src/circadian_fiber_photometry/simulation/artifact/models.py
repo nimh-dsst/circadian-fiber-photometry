@@ -42,17 +42,34 @@ class SyntheticRandomBoxArtifactConfig:
 
 
 @dataclass(frozen=True)
+class SyntheticPhotometryDisconnectionConfig:
+    """Equipment-shutdown artifact that clamps simulated lock-in signals."""
+
+    start_seconds: float | None = None
+    time_reference: Literal["series", "experiment"] = "experiment"
+    duration_seconds: float | None = None
+    isosbestic_floor: float = 0.0
+    calcium_floor: float = 0.0
+    channels: tuple[int, ...] | None = None
+    series_numbers: tuple[int, ...] | None = None
+    name: str | None = None
+
+
+@dataclass(frozen=True)
 class SyntheticArtifactOccurrence:
     """Ground truth for one artifact applied to one channel in one series.
 
     ``stop_sample`` is exclusive. Relative times describe the realized sample
     bounds within the series; absolute times include the series start time.
+    Additive-only fraction and offset fields are ``None`` for a photometry
+    disconnection, which instead reports the configured signal floors.
     """
 
     artifact_type: Literal[
         "session_start_spike",
         "scheduled_box",
         "random_box",
+        "photometry_disconnection",
     ]
     name: str | None
     source_index: int
@@ -61,12 +78,15 @@ class SyntheticArtifactOccurrence:
     start_sample: int
     stop_sample: int
     requested_start_seconds: float
-    requested_duration_seconds: float
+    requested_duration_seconds: float | None
     start_seconds_within_series: float
     stop_seconds_within_series: float
     absolute_start_seconds: float
     absolute_stop_seconds: float
     realized_duration_seconds: float
-    magnitude_fraction: float
-    isosbestic_offset: float
-    calcium_offset: float
+    magnitude_fraction: float | None
+    isosbestic_offset: float | None
+    calcium_offset: float | None
+    time_reference: Literal["series", "experiment"] = "series"
+    isosbestic_floor: float | None = None
+    calcium_floor: float | None = None

@@ -11,12 +11,19 @@ import numpy as np
 
 from .models import (
     SyntheticArtifactOccurrence,
+    SyntheticPhotometryDisconnectionConfig,
     SyntheticRandomBoxArtifactConfig,
     SyntheticScheduledBoxArtifactConfig,
     SyntheticSessionStartSpikeConfig,
 )
 
-_ArtifactType = Literal["session_start_spike", "scheduled_box", "random_box"]
+_ArtifactType = Literal[
+    "session_start_spike",
+    "scheduled_box",
+    "random_box",
+    "photometry_disconnection",
+]
+_TimeReference = Literal["series", "experiment"]
 
 
 @dataclass(frozen=True)
@@ -27,8 +34,11 @@ class _PlannedArtifact:
     start_sample: int
     stop_sample: int
     requested_start_seconds: float
-    requested_duration_seconds: float
-    magnitude_fraction: float
+    requested_duration_seconds: float | None
+    magnitude_fraction: float | None
+    time_reference: _TimeReference = "series"
+    isosbestic_floor: float | None = None
+    calcium_floor: float | None = None
 
 
 @dataclass(frozen=True)
@@ -43,10 +53,12 @@ def build_artifact_schedule(
     session_start_spike: SyntheticSessionStartSpikeConfig | None,
     scheduled_box_artifacts: tuple[SyntheticScheduledBoxArtifactConfig, ...],
     random_box_artifacts: tuple[SyntheticRandomBoxArtifactConfig, ...],
+    photometry_disconnection: SyntheticPhotometryDisconnectionConfig | None,
     series_count: int,
     channel_count: int,
     samples_per_series: int,
     session_duration_seconds: float,
+    series_start_times_seconds: Sequence[float],
     fs: float,
     seed: int,
 ) -> ArtifactSchedule:
@@ -98,6 +110,17 @@ def build_artifact_schedule(
             box_bounds_by_key,
         )
 
+    if photometry_disconnection is not None:
+        _add_photometry_disconnection(
+            photometry_disconnection,
+            series_count,
+            channel_count,
+            samples_per_series,
+            series_start_times_seconds,
+            fs,
+            intervals_by_key,
+        )
+
     return ArtifactSchedule(
         intervals_by_key={
             key: tuple(
@@ -139,6 +162,9 @@ def apply_artifact_schedule(
     occurrences: list[SyntheticArtifactOccurrence] = []
 
     for interval in intervals:
+        if interval.artifact_type == "photometry_disconnection":
+            continue
+        assert interval.magnitude_fraction is not None
         isosbestic_offset = interval.magnitude_fraction * isosbestic_mean
         calcium_offset = interval.magnitude_fraction * calcium_mean
         artifact_isosbestic[interval.start_sample : interval.stop_sample] += (
@@ -169,6 +195,46 @@ def apply_artifact_schedule(
                 magnitude_fraction=interval.magnitude_fraction,
                 isosbestic_offset=isosbestic_offset,
                 calcium_offset=calcium_offset,
+                time_reference=interval.time_reference,
+            )
+        )
+
+    for interval in intervals:
+        if interval.artifact_type != "photometry_disconnection":
+            continue
+        assert interval.isosbestic_floor is not None
+        assert interval.calcium_floor is not None
+        artifact_isosbestic[interval.start_sample : interval.stop_sample] = (
+            interval.isosbestic_floor
+        )
+        artifact_calcium[interval.start_sample : interval.stop_sample] = (
+            interval.calcium_floor
+        )
+
+        start_seconds = interval.start_sample / fs
+        stop_seconds = interval.stop_sample / fs
+        occurrences.append(
+            SyntheticArtifactOccurrence(
+                artifact_type=interval.artifact_type,
+                name=interval.name,
+                source_index=interval.source_index,
+                series_number=series_number,
+                channel_number=channel_number,
+                start_sample=interval.start_sample,
+                stop_sample=interval.stop_sample,
+                requested_start_seconds=interval.requested_start_seconds,
+                requested_duration_seconds=interval.requested_duration_seconds,
+                start_seconds_within_series=start_seconds,
+                stop_seconds_within_series=stop_seconds,
+                absolute_start_seconds=series_start_seconds + start_seconds,
+                absolute_stop_seconds=series_start_seconds + stop_seconds,
+                realized_duration_seconds=stop_seconds - start_seconds,
+                magnitude_fraction=None,
+                isosbestic_offset=None,
+                calcium_offset=None,
+                time_reference=interval.time_reference,
+                isosbestic_floor=interval.isosbestic_floor,
+                calcium_floor=interval.calcium_floor,
             )
         )
 
@@ -352,6 +418,195 @@ def _add_random_boxes(
                 key = (series_number, channel_number)
                 intervals_by_key[key].append(interval)
                 box_bounds_by_key[key].append((start_sample, stop_sample))
+
+
+def _add_photometry_disconnection(
+    config: SyntheticPhotometryDisconnectionConfig,
+    series_count: int,
+    channel_count: int,
+    samples_per_series: int,
+    series_start_times_seconds: Sequence[float],
+    fs: float,
+    intervals_by_key: dict[tuple[int, int], list[_PlannedArtifact]],
+) -> None:
+    if config.time_reference not in ("series", "experiment"):
+        raise ValueError("time_reference must be 'series' or 'experiment'")
+    _require_finite(config.isosbestic_floor, "isosbestic_floor")
+    _require_finite(config.calcium_floor, "calcium_floor")
+    channels = _resolve_selectors(config.channels, channel_count, "channels")
+    duration_samples = (
+        None
+        if config.duration_seconds is None
+        else _positive_seconds_to_samples(
+            config.duration_seconds,
+            fs,
+            "disconnection duration_seconds",
+        )
+    )
+    requested_duration_seconds = (
+        None
+        if config.duration_seconds is None
+        else float(config.duration_seconds)
+    )
+
+    if config.time_reference == "series":
+        series_numbers = (
+            (series_count,)
+            if config.series_numbers is None
+            else _resolve_selectors(
+                config.series_numbers,
+                series_count,
+                "series_numbers",
+            )
+        )
+        start_sample, requested_start_seconds = _series_disconnection_start(
+            config.start_seconds,
+            samples_per_series,
+            fs,
+        )
+        for series_number in series_numbers:
+            _append_photometry_disconnection(
+                config,
+                series_number,
+                channels,
+                start_sample,
+                duration_samples,
+                requested_start_seconds,
+                requested_duration_seconds,
+                "series",
+                samples_per_series,
+                intervals_by_key,
+            )
+        return
+
+    if config.series_numbers is not None:
+        raise ValueError(
+            "series_numbers cannot be used with experiment-relative disconnection"
+        )
+    if len(series_start_times_seconds) != series_count:
+        raise ValueError("series start times must match series_count")
+    series_number, start_sample, requested_start_seconds = (
+        _experiment_disconnection_start(
+            config.start_seconds,
+            samples_per_series,
+            series_start_times_seconds,
+            fs,
+        )
+    )
+    _append_photometry_disconnection(
+        config,
+        series_number,
+        channels,
+        start_sample,
+        duration_samples,
+        requested_start_seconds,
+        requested_duration_seconds,
+        "experiment",
+        samples_per_series,
+        intervals_by_key,
+    )
+
+
+def _series_disconnection_start(
+    requested_start_seconds: float | None,
+    samples_per_series: int,
+    fs: float,
+) -> tuple[int, float]:
+    if requested_start_seconds is None:
+        final_second_samples = _positive_seconds_to_samples(
+            1.0,
+            fs,
+            "default disconnection duration",
+        )
+        if final_second_samples > samples_per_series:
+            raise ValueError("session is too short for the default disconnection")
+        start_sample = samples_per_series - final_second_samples
+        return start_sample, start_sample / fs
+
+    start_sample = _nonnegative_seconds_to_samples(
+        requested_start_seconds,
+        fs,
+        "disconnection start_seconds",
+    )
+    if start_sample >= samples_per_series:
+        raise ValueError("disconnection start_seconds must resolve within a series")
+    return start_sample, float(requested_start_seconds)
+
+
+def _experiment_disconnection_start(
+    requested_start_seconds: float | None,
+    samples_per_series: int,
+    series_start_times_seconds: Sequence[float],
+    fs: float,
+) -> tuple[int, int, float]:
+    if requested_start_seconds is None:
+        series_number = len(series_start_times_seconds)
+        start_sample, relative_start_seconds = _series_disconnection_start(
+            None,
+            samples_per_series,
+            fs,
+        )
+        absolute_start_seconds = (
+            float(series_start_times_seconds[-1]) + relative_start_seconds
+        )
+        return series_number, start_sample, absolute_start_seconds
+
+    _require_nonnegative(
+        requested_start_seconds,
+        "disconnection start_seconds",
+    )
+    absolute_start_seconds = float(requested_start_seconds)
+    recorded_duration_seconds = samples_per_series / fs
+    for series_index, series_start_value in enumerate(series_start_times_seconds):
+        series_start_seconds = float(series_start_value)
+        series_stop_seconds = series_start_seconds + recorded_duration_seconds
+        if series_start_seconds <= absolute_start_seconds < series_stop_seconds:
+            start_sample = int(
+                round((absolute_start_seconds - series_start_seconds) * fs)
+            )
+            if start_sample >= samples_per_series:
+                raise ValueError(
+                    "disconnection start_seconds must resolve to a recorded sample"
+                )
+            return series_index + 1, start_sample, absolute_start_seconds
+    raise ValueError(
+        "experiment-relative disconnection start_seconds must fall within a "
+        "recorded series"
+    )
+
+
+def _append_photometry_disconnection(
+    config: SyntheticPhotometryDisconnectionConfig,
+    series_number: int,
+    channels: tuple[int, ...],
+    start_sample: int,
+    duration_samples: int | None,
+    requested_start_seconds: float,
+    requested_duration_seconds: float | None,
+    time_reference: _TimeReference,
+    samples_per_series: int,
+    intervals_by_key: dict[tuple[int, int], list[_PlannedArtifact]],
+) -> None:
+    stop_sample = (
+        samples_per_series
+        if duration_samples is None
+        else min(start_sample + duration_samples, samples_per_series)
+    )
+    interval = _PlannedArtifact(
+        artifact_type="photometry_disconnection",
+        name=config.name,
+        source_index=0,
+        start_sample=start_sample,
+        stop_sample=stop_sample,
+        requested_start_seconds=requested_start_seconds,
+        requested_duration_seconds=requested_duration_seconds,
+        magnitude_fraction=None,
+        time_reference=time_reference,
+        isosbestic_floor=float(config.isosbestic_floor),
+        calcium_floor=float(config.calcium_floor),
+    )
+    for channel_number in channels:
+        intervals_by_key[(series_number, channel_number)].append(interval)
 
 
 def _expand_scheduled_durations(

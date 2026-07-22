@@ -321,7 +321,7 @@ Artifact configuration lives under
 `SyntheticSignalConfig`. Enabling them changes only the 405 and 465 lock-in
 traces; simulated analog input remains unchanged.
 
-For each target signal, an artifact's constant box offset is
+For each target signal, an additive artifact's constant box offset is
 
 ```text
 offset = magnitude_fraction * mean(pre-artifact signal)
@@ -347,12 +347,26 @@ random boxes on the same series/channel, although they may overlap the
 session-start spike. Random placement raises `ValueError` when the requested
 non-overlapping schedule cannot fit.
 
+`configure_photometry_disconnection` simulates equipment being switched off by
+clamping the selected 405 and 465 traces to independently configurable voltage
+floors (both default to `0.0` V). With no start time, it clamps the final second
+of the final series. Series-relative timing repeats the requested onset in each
+selected series, defaulting to the final series when no selector is given.
+Experiment-relative timing uses seconds from the beginning of the file and must
+fall inside a recorded series rather than an inter-series gap. A disconnection
+continues to the end of its containing series unless a duration is supplied;
+durations that extend beyond the boundary are clipped. It may overlap any other
+artifact and is applied last, so the configured floors win. As with the other
+artifact models, analog input remains unchanged.
+
 `SyntheticDoricSummary.artifact_occurrences` reports the realized ground truth
 for every affected series/channel: half-open sample bounds, within-series and
 absolute seconds, requested and sample-realized duration, signed fraction, and
-the exact 405/465 voltage offsets. Random scheduling uses a dedicated stream
-derived from `SyntheticDoricConfig.seed`, so it is repeatable without changing
-the simulator's other random traces.
+the exact 405/465 voltage offsets or disconnection floors. The time-reference
+field distinguishes series-relative and experiment-relative requests;
+additive-only fraction and offset fields are `None` for disconnections. Random
+scheduling uses a dedicated stream derived from `SyntheticDoricConfig.seed`, so
+it is repeatable without changing the simulator's other random traces.
 
 Calcium events default to a 9 s^-1 rise rate and 1 s^-1 fall rate, matching the
 jGCaMP7-style kinetics used by the simulator.

@@ -96,6 +96,14 @@ Copy this line for each new request:
   configurable counts or rates, time windows, durations, channels, and series.
   Reuse the signed-amplitude behavior of scheduled box artifacts and return
   their ground-truth locations and parameters.
+- [x] **Photometry-shutdown signal-drop artifact** — Simulate the severe,
+  sustained drop in calcium and isosbestic signals caused by switching off the
+  photometry equipment before recording stops. When enabled, place the drop in
+  the final second of the final series by default, support series-relative and
+  experiment-relative onset times, and provide separate calcium and isosbestic
+  signal floors. Let the drop persist through the end of its containing series
+  unless a duration is supplied, and return its affected channels, sample
+  bounds, timing, and parameters in the simulator ground truth.
 - [x] **Single-exponential photobleaching** — Replace the current linear
   across-session and within-session bleaching factors with configurable
   single-exponential decay for both calcium and isosbestic signals. Preserve the

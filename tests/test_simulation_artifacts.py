@@ -11,12 +11,14 @@ from circadian_fiber_photometry.simulation import (
     SyntheticArtifactOccurrence,
     SyntheticDoricConfig,
     SyntheticPhotobleachingConfig,
+    SyntheticPhotometryDisconnectionConfig,
     SyntheticRandomBoxArtifactConfig,
     SyntheticScheduledBoxArtifactConfig,
     SyntheticSessionStartSpikeConfig,
     SyntheticSignalConfig,
     add_random_box_artifacts,
     add_scheduled_box_artifacts,
+    configure_photometry_disconnection,
     configure_session_start_spike,
     generate_synthetic_doric,
 )
@@ -24,10 +26,16 @@ from circadian_fiber_photometry.simulation.artifact import (
     SyntheticArtifactOccurrence as CanonicalArtifactOccurrence,
 )
 from circadian_fiber_photometry.simulation.artifact import (
+    SyntheticPhotometryDisconnectionConfig as CanonicalDisconnectionConfig,
+)
+from circadian_fiber_photometry.simulation.artifact import (
     add_random_box_artifacts as canonical_add_random_box_artifacts,
 )
 from circadian_fiber_photometry.simulation.artifact import (
     add_scheduled_box_artifacts as canonical_add_scheduled_box_artifacts,
+)
+from circadian_fiber_photometry.simulation.artifact import (
+    configure_photometry_disconnection as canonical_configure_disconnection,
 )
 from circadian_fiber_photometry.simulation.artifact import (
     configure_session_start_spike as canonical_configure_session_start_spike,
@@ -81,14 +89,20 @@ def _read_analog(path, series: int, channel: int) -> np.ndarray:
 
 def test_artifact_types_are_available_from_both_simulation_namespaces() -> None:
     assert SyntheticArtifactOccurrence is CanonicalArtifactOccurrence
+    assert SyntheticPhotometryDisconnectionConfig is CanonicalDisconnectionConfig
     assert add_random_box_artifacts is canonical_add_random_box_artifacts
     assert add_scheduled_box_artifacts is canonical_add_scheduled_box_artifacts
     assert configure_session_start_spike is canonical_configure_session_start_spike
+    assert configure_photometry_disconnection is canonical_configure_disconnection
     assert SyntheticSessionStartSpikeConfig().duration_seconds == 1.0
     assert SyntheticSessionStartSpikeConfig().magnitude_fraction == 1.0
     assert SyntheticScheduledBoxArtifactConfig((1.0,)).magnitude_fraction == 0.10
     random_config = SyntheticRandomBoxArtifactConfig(count_per_series=1)
     assert random_config.duration_range_seconds == (1.0, 1.0)
+    disconnection = SyntheticPhotometryDisconnectionConfig()
+    assert disconnection.time_reference == "experiment"
+    assert disconnection.isosbestic_floor == 0.0
+    assert disconnection.calcium_floor == 0.0
 
 
 def test_artifact_marimo_example_imports() -> None:
@@ -367,6 +381,260 @@ def test_random_artifact_rng_does_not_perturb_existing_stochastic_signals(
                 offset_name,
             )
         np.testing.assert_allclose(restored, clean)
+
+
+def test_disconnection_defaults_to_final_second_of_final_series(tmp_path) -> None:
+    clean_signal = _flat_signal()
+    disconnected_signal = configure_photometry_disconnection(
+        clean_signal,
+        isosbestic_floor=0.005,
+        calcium_floor=0.007,
+        name="equipment off",
+    )
+    common = {"series_count": 3, "channel_count": 2, "fs": 20.0}
+    clean_path = tmp_path / "disconnection_clean.doric"
+    disconnected_path = tmp_path / "disconnection_default.doric"
+
+    clean_summary = generate_synthetic_doric(
+        clean_path,
+        _config(clean_signal, **common),
+    )
+    disconnected_summary = generate_synthetic_doric(
+        disconnected_path,
+        _config(disconnected_signal, **common),
+    )
+
+    assert clean_summary.artifact_occurrences == ()
+    assert len(disconnected_summary.artifact_occurrences) == 2
+    for series in (1, 2, 3):
+        for channel in (1, 2):
+            np.testing.assert_allclose(
+                _read_analog(disconnected_path, series, channel),
+                _read_analog(clean_path, series, channel),
+            )
+            for output, floor in ((1, 0.005), (2, 0.007)):
+                clean = _read_signal(clean_path, series, channel, output)
+                disconnected = _read_signal(
+                    disconnected_path,
+                    series,
+                    channel,
+                    output,
+                )
+                if series < 3:
+                    np.testing.assert_allclose(disconnected, clean)
+                else:
+                    np.testing.assert_allclose(disconnected[:380], clean[:380])
+                    np.testing.assert_allclose(disconnected[380:], floor)
+
+    occurrence = disconnected_summary.artifact_occurrences[0]
+    assert occurrence.artifact_type == "photometry_disconnection"
+    assert occurrence.name == "equipment off"
+    assert occurrence.series_number == 3
+    assert (occurrence.start_sample, occurrence.stop_sample) == (380, 400)
+    assert occurrence.requested_start_seconds == pytest.approx(79.0)
+    assert occurrence.requested_duration_seconds is None
+    assert occurrence.time_reference == "experiment"
+    assert occurrence.absolute_start_seconds == pytest.approx(79.0)
+    assert occurrence.absolute_stop_seconds == pytest.approx(80.0)
+    assert occurrence.realized_duration_seconds == pytest.approx(1.0)
+    assert occurrence.magnitude_fraction is None
+    assert occurrence.isosbestic_offset is None
+    assert occurrence.calcium_offset is None
+    assert occurrence.isosbestic_floor == pytest.approx(0.005)
+    assert occurrence.calcium_floor == pytest.approx(0.007)
+
+
+def test_series_relative_disconnection_supports_selectors_and_duration(
+    tmp_path,
+) -> None:
+    clean_signal = _flat_signal()
+    disconnected_signal = configure_photometry_disconnection(
+        clean_signal,
+        start_seconds=4.04,
+        time_reference="series",
+        duration_seconds=1.06,
+        isosbestic_floor=-0.01,
+        calcium_floor=0.02,
+        channels=(2,),
+        series_numbers=(1, 3),
+    )
+    common = {"series_count": 3, "channel_count": 2, "fs": 20.0}
+    clean_path = tmp_path / "series_relative_clean.doric"
+    disconnected_path = tmp_path / "series_relative.doric"
+    generate_synthetic_doric(clean_path, _config(clean_signal, **common))
+    summary = generate_synthetic_doric(
+        disconnected_path,
+        _config(disconnected_signal, **common),
+    )
+
+    assert [
+        (item.series_number, item.channel_number, item.start_sample, item.stop_sample)
+        for item in summary.artifact_occurrences
+    ] == [(1, 2, 81, 102), (3, 2, 81, 102)]
+    for series in (1, 3):
+        for output, floor in ((1, -0.01), (2, 0.02)):
+            clean = _read_signal(clean_path, series, 2, output)
+            disconnected = _read_signal(disconnected_path, series, 2, output)
+            np.testing.assert_allclose(disconnected[:81], clean[:81])
+            np.testing.assert_allclose(disconnected[81:102], floor)
+            np.testing.assert_allclose(disconnected[102:], clean[102:])
+    np.testing.assert_allclose(
+        _read_signal(disconnected_path, 2, 2, 1),
+        _read_signal(clean_path, 2, 2, 1),
+    )
+    np.testing.assert_allclose(
+        _read_signal(disconnected_path, 1, 1, 1),
+        _read_signal(clean_path, 1, 1, 1),
+    )
+    assert all(
+        item.time_reference == "series"
+        and item.requested_start_seconds == pytest.approx(4.04)
+        and item.requested_duration_seconds == pytest.approx(1.06)
+        and item.realized_duration_seconds == pytest.approx(1.05)
+        for item in summary.artifact_occurrences
+    )
+
+
+def test_experiment_relative_disconnection_maps_series_and_clips_duration(
+    tmp_path,
+) -> None:
+    clean_signal = _flat_signal()
+    disconnected_signal = configure_photometry_disconnection(
+        clean_signal,
+        start_seconds=34.04,
+        duration_seconds=100.0,
+        isosbestic_floor=0.003,
+        calcium_floor=0.004,
+    )
+    common = {"series_count": 3, "channel_count": 1, "fs": 20.0}
+    clean_path = tmp_path / "absolute_clean.doric"
+    disconnected_path = tmp_path / "absolute_disconnection.doric"
+    generate_synthetic_doric(clean_path, _config(clean_signal, **common))
+    summary = generate_synthetic_doric(
+        disconnected_path,
+        _config(disconnected_signal, **common),
+    )
+
+    occurrence = summary.artifact_occurrences[0]
+    assert occurrence.series_number == 2
+    assert (occurrence.start_sample, occurrence.stop_sample) == (81, 400)
+    assert occurrence.requested_start_seconds == pytest.approx(34.04)
+    assert occurrence.requested_duration_seconds == pytest.approx(100.0)
+    assert occurrence.absolute_start_seconds == pytest.approx(34.05)
+    assert occurrence.absolute_stop_seconds == pytest.approx(50.0)
+    assert occurrence.realized_duration_seconds == pytest.approx(15.95)
+    for series in (1, 3):
+        np.testing.assert_allclose(
+            _read_signal(disconnected_path, series, 1, 1),
+            _read_signal(clean_path, series, 1, 1),
+        )
+
+
+def test_disconnection_clamp_wins_over_overlapping_additive_artifacts(
+    tmp_path,
+) -> None:
+    signal = configure_session_start_spike(_flat_signal(), duration_seconds=20.0)
+    signal = add_scheduled_box_artifacts(
+        signal,
+        [19.0],
+        durations_seconds=1.0,
+        magnitude_fraction=0.5,
+    )
+    signal = configure_photometry_disconnection(
+        signal,
+        isosbestic_floor=0.001,
+        calcium_floor=0.002,
+    )
+
+    summary = generate_synthetic_doric(
+        tmp_path / "overlapping_disconnection.doric",
+        _config(signal),
+    )
+
+    assert [item.artifact_type for item in summary.artifact_occurrences] == [
+        "session_start_spike",
+        "photometry_disconnection",
+        "scheduled_box",
+    ]
+    np.testing.assert_allclose(
+        _read_signal(tmp_path / "overlapping_disconnection.doric", 1, 1, 1)[380:],
+        0.001,
+    )
+    np.testing.assert_allclose(
+        _read_signal(tmp_path / "overlapping_disconnection.doric", 1, 1, 2)[380:],
+        0.002,
+    )
+
+
+@pytest.mark.parametrize(
+    ("signal", "match"),
+    [
+        (
+            configure_photometry_disconnection(
+                _flat_signal(),
+                time_reference="invalid",  # type: ignore[arg-type]
+            ),
+            "time_reference",
+        ),
+        (
+            configure_photometry_disconnection(
+                _flat_signal(),
+                start_seconds=25.0,
+            ),
+            "recorded series",
+        ),
+        (
+            configure_photometry_disconnection(
+                _flat_signal(),
+                start_seconds=90.0,
+            ),
+            "recorded series",
+        ),
+        (
+            configure_photometry_disconnection(
+                _flat_signal(),
+                start_seconds=-1.0,
+            ),
+            "nonnegative",
+        ),
+        (
+            configure_photometry_disconnection(
+                _flat_signal(),
+                series_numbers=(1,),
+            ),
+            "series_numbers cannot",
+        ),
+        (
+            configure_photometry_disconnection(
+                _flat_signal(),
+                duration_seconds=0.0,
+            ),
+            "duration_seconds must be positive",
+        ),
+        (
+            configure_photometry_disconnection(
+                _flat_signal(),
+                duration_seconds=0.001,
+            ),
+            "round to at least 1 sample",
+        ),
+        (
+            configure_photometry_disconnection(
+                _flat_signal(),
+                calcium_floor=np.nan,
+            ),
+            "calcium_floor must be finite",
+        ),
+    ],
+)
+def test_disconnection_rejects_invalid_configuration(
+    tmp_path,
+    signal,
+    match,
+) -> None:
+    config = _config(signal, series_count=3)
+    with pytest.raises(ValueError, match=match):
+        generate_synthetic_doric(tmp_path / "invalid_disconnection.doric", config)
 
 
 @pytest.mark.parametrize(

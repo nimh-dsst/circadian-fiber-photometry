@@ -2,11 +2,13 @@
 
 from .artifact import (
     SyntheticArtifactOccurrence,
+    SyntheticPhotometryDisconnectionConfig,
     SyntheticRandomBoxArtifactConfig,
     SyntheticScheduledBoxArtifactConfig,
     SyntheticSessionStartSpikeConfig,
     add_random_box_artifacts,
     add_scheduled_box_artifacts,
+    configure_photometry_disconnection,
     configure_session_start_spike,
 )
 from .doric import (
@@ -41,6 +43,7 @@ __all__ = [
     "SyntheticPhotobleachingComponentConfig",
     "SyntheticPhotobleachingConfig",
     "SyntheticPhotobleachingMetadata",
+    "SyntheticPhotometryDisconnectionConfig",
     "SyntheticRandomBoxArtifactConfig",
     "SyntheticRandomCalciumEventConfig",
     "SyntheticScheduledBoxArtifactConfig",
@@ -58,6 +61,7 @@ __all__ = [
     "add_scheduled_box_artifacts",
     "add_scheduled_calcium_events",
     "add_tonic_component",
+    "configure_photometry_disconnection",
     "configure_session_start_spike",
     "generate_synthetic_doric",
 ]

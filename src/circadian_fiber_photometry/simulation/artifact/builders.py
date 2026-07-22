@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
 from .models import (
+    SyntheticPhotometryDisconnectionConfig,
     SyntheticRandomBoxArtifactConfig,
     SyntheticScheduledBoxArtifactConfig,
     SyntheticSessionStartSpikeConfig,
@@ -100,6 +101,33 @@ def add_random_box_artifacts(
         signal,
         random_box_artifacts=signal.random_box_artifacts + (artifact,),
     )
+
+
+def configure_photometry_disconnection(
+    signal: SyntheticSignalConfig,
+    *,
+    start_seconds: float | None = None,
+    time_reference: Literal["series", "experiment"] = "experiment",
+    duration_seconds: float | None = None,
+    isosbestic_floor: float = 0.0,
+    calcium_floor: float = 0.0,
+    channels: Sequence[int] | np.ndarray | None = None,
+    series_numbers: Sequence[int] | np.ndarray | None = None,
+    name: str | None = None,
+) -> SyntheticSignalConfig:
+    """Return ``signal`` configured with one equipment-shutdown artifact."""
+
+    disconnection = SyntheticPhotometryDisconnectionConfig(
+        start_seconds=start_seconds,
+        time_reference=time_reference,
+        duration_seconds=duration_seconds,
+        isosbestic_floor=isosbestic_floor,
+        calcium_floor=calcium_floor,
+        channels=_normalize_optional_int_tuple(channels),
+        series_numbers=_normalize_optional_int_tuple(series_numbers),
+        name=name,
+    )
+    return replace(signal, photometry_disconnection=disconnection)
 
 
 def _normalize_optional_int_tuple(

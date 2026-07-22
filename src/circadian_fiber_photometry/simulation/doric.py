@@ -17,6 +17,7 @@ from .artifact.engine import (
 )
 from .artifact.models import (
     SyntheticArtifactOccurrence,
+    SyntheticPhotometryDisconnectionConfig,
     SyntheticRandomBoxArtifactConfig,
     SyntheticScheduledBoxArtifactConfig,
     SyntheticSessionStartSpikeConfig,
@@ -106,6 +107,7 @@ class SyntheticSignalConfig:
     photobleaching: SyntheticPhotobleachingConfig = field(
         default_factory=SyntheticPhotobleachingConfig
     )
+    photometry_disconnection: SyntheticPhotometryDisconnectionConfig | None = None
 
 
 def add_tonic_component(
@@ -349,10 +351,12 @@ def generate_synthetic_doric(
         session_start_spike=config.signal.session_start_spike,
         scheduled_box_artifacts=config.signal.scheduled_box_artifacts,
         random_box_artifacts=config.signal.random_box_artifacts,
+        photometry_disconnection=config.signal.photometry_disconnection,
         series_count=config.series_count,
         channel_count=config.channel_count,
         samples_per_series=validated.samples_per_series,
         session_duration_seconds=config.session_duration_seconds,
+        series_start_times_seconds=session_start_times,
         fs=config.fs,
         seed=config.seed,
     )

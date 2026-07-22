@@ -17,9 +17,11 @@ def _(mo):
     # Synthetic photometry artifacts
 
     This focused example adds every artifact model currently available to a
-    clean Doric-style recording: a session-start spike, positive and negative
-    scheduled boxes, fixed-count random boxes, and rate-driven random boxes.
-    All artifact timing is expressed in seconds relative to the series start.
+    clean Doric-style recording: a brief five-sample session-start spike,
+    positive and negative scheduled boxes, fixed-count and rate-driven random
+    boxes, and a photometry disconnection. Artifact timing is expressed in
+    seconds relative to a series or to the full experiment, depending on the
+    configured time reference.
     """)
     return
 
@@ -37,6 +39,7 @@ def _():
         SyntheticSignalConfig,
         add_random_box_artifacts,
         add_scheduled_box_artifacts,
+        configure_photometry_disconnection,
         configure_session_start_spike,
         generate_synthetic_doric,
     )
@@ -48,6 +51,7 @@ def _():
         SyntheticSignalConfig,
         add_random_box_artifacts,
         add_scheduled_box_artifacts,
+        configure_photometry_disconnection,
         configure_session_start_spike,
         generate_synthetic_doric,
         go,
@@ -63,10 +67,12 @@ def _(
     SyntheticSignalConfig,
     add_random_box_artifacts,
     add_scheduled_box_artifacts,
+    configure_photometry_disconnection,
     configure_session_start_spike,
     generate_synthetic_doric,
     notebook_dir,
 ):
+    sampling_rate_hz = 20.0
     base_signal = SyntheticSignalConfig(
         photobleaching=SyntheticPhotobleachingConfig(model="none"),
         artifact_amplitude=0.0,
@@ -78,7 +84,8 @@ def _(
     )
     artifact_signal = configure_session_start_spike(
         base_signal,
-        name="one-second startup spike",
+        duration_seconds=5 / sampling_rate_hz,
+        name="five-sample startup spike",
     )
     artifact_signal = add_scheduled_box_artifacts(
         artifact_signal,
@@ -110,12 +117,18 @@ def _(
         magnitude_fraction=-0.10,
         name="rate-driven random drops",
     )
+    artifact_signal = configure_photometry_disconnection(
+        artifact_signal,
+        isosbestic_floor=0.005,
+        calcium_floor=0.007,
+        name="equipment switched off",
+    )
 
     simulation_config = SyntheticDoricConfig(
         series_count=1,
         session_duration_seconds=20.0,
         inter_series_gap_seconds=0.0,
-        fs=20.0,
+        fs=sampling_rate_hz,
         channel_count=1,
         seed=123,
         signal=artifact_signal,
@@ -143,6 +156,9 @@ def _(artifact_summary, load_doric, mo, output_path):
             "fraction": item.magnitude_fraction,
             "405 offset (V)": item.isosbestic_offset,
             "465 offset (V)": item.calcium_offset,
+            "time reference": item.time_reference,
+            "405 floor (V)": item.isosbestic_floor,
+            "465 floor (V)": item.calcium_floor,
         }
         for item in artifact_summary.artifact_occurrences
     ]
@@ -166,7 +182,7 @@ def _(mo):
 
     Shaded regions come directly from the half-open sample bounds in the
     simulator ground truth. Positive artifacts are red and negative artifacts
-    are blue.
+    are blue; the equipment-disconnection interval is gray.
     """)
     return
 
@@ -190,11 +206,15 @@ def _(artifact_dataset, artifact_summary, go, mo, simulation_config):
         mode="lines",
     )
     for artifact_item in artifact_summary.artifact_occurrences:
-        fill_color = (
-            "rgba(215, 48, 39, 0.18)"
-            if artifact_item.magnitude_fraction > 0
-            else "rgba(69, 117, 180, 0.18)"
-        )
+        if artifact_item.artifact_type == "photometry_disconnection":
+            fill_color = "rgba(64, 64, 64, 0.22)"
+        else:
+            assert artifact_item.magnitude_fraction is not None
+            fill_color = (
+                "rgba(215, 48, 39, 0.18)"
+                if artifact_item.magnitude_fraction > 0
+                else "rgba(69, 117, 180, 0.18)"
+            )
         artifact_figure.add_vrect(
             x0=artifact_item.start_sample / simulation_config.fs,
             x1=artifact_item.stop_sample / simulation_config.fs,
