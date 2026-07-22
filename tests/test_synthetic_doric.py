@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import runpy
+from pathlib import Path
+
 import h5py
 import numpy as np
 import pytest
@@ -173,6 +176,15 @@ def test_generate_synthetic_doric_applies_configured_tonic_component(
     np.testing.assert_allclose(calcium_channel_1, expected)
     np.testing.assert_allclose(calcium_channel_2, baseline)
     np.testing.assert_allclose(calcium_series_2, baseline)
+
+
+def test_simulator_demonstration_marimo_example_imports() -> None:
+    pytest.importorskip("marimo")
+    example_path = Path(__file__).parents[1] / "examples" / "simulator_demonstration.py"
+
+    namespace = runpy.run_path(example_path)
+
+    assert namespace["app"].__class__.__module__.startswith("marimo")
 
 
 def test_generate_synthetic_doric_applies_scheduled_calcium_events_with_default_rates(
