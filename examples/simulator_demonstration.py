@@ -51,8 +51,10 @@ def _():
         SyntheticPhotobleachingConfig,
         SyntheticSignalConfig,
         add_gaussian_noise,
+        add_random_box_artifacts,
         add_random_calcium_events,
         add_tonic_component,
+        configure_session_start_spike,
         generate_synthetic_doric,
     )
 
@@ -62,8 +64,10 @@ def _():
         SyntheticPhotobleachingConfig,
         SyntheticSignalConfig,
         add_gaussian_noise,
+        add_random_box_artifacts,
         add_random_calcium_events,
         add_tonic_component,
+        configure_session_start_spike,
         generate_synthetic_doric,
         go,
         load_doric,
@@ -765,6 +769,7 @@ def _(
         noisy_phasic_dataset,
         noisy_phasic_event_times_minutes,
         noisy_phasic_output_path,
+        noisy_phasic_signal_config,
     )
 
 
@@ -868,6 +873,267 @@ def _(
 def _(mo, noisy_phasic_figure):
     mo.ui.plotly(
         noisy_phasic_figure,
+        config={"scrollZoom": True, "responsive": True},
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Session-start spike and random box artifacts
+
+    This final demonstration reuses the noisy phasic signal from the previous
+    plot and layers two acquisition artifacts on top of it:
+
+    - `configure_session_start_spike` adds one box-shaped spike at the very
+      beginning of the recording. Its magnitude is expressed as a fraction of
+      each channel's mean, so both the 465 nm calcium and 405 nm isosbestic
+      streams jump together for the configured duration.
+    - `add_random_box_artifacts` places seeded, non-overlapping box artifacts at
+      random start times and durations. A signed `magnitude_fraction` shifts the
+      recorded channels up (or down) across each box interval.
+
+    Both builders return a new signal configuration and record their realized
+    sample bounds in `SyntheticDoricSummary.artifact_occurrences`, so the exact
+    artifact locations below come from the simulator's ground truth. The shaded
+    orange region marks the session-start spike and the purple regions mark the
+    random box artifacts.
+    """)
+    return
+
+
+@app.cell
+def _(
+    SyntheticDoricConfig,
+    add_random_box_artifacts,
+    channel_count,
+    configure_session_start_spike,
+    fs,
+    generate_synthetic_doric,
+    inter_series_gap_seconds,
+    load_doric,
+    noisy_phasic_signal_config,
+    notebook_dir,
+    session_duration_seconds,
+):
+    spike_duration_seconds = 1.0
+    spike_magnitude_fraction = 1.5
+    box_count_per_series = 4
+    box_magnitude_fraction = 0.4
+    box_duration_range_seconds = (3.0, 8.0)
+    box_start_window_seconds = (30.0, 570.0)
+
+    artifact_signal_config = configure_session_start_spike(
+        noisy_phasic_signal_config,
+        duration_seconds=spike_duration_seconds,
+        magnitude_fraction=spike_magnitude_fraction,
+        name="session-start spike artifact",
+    )
+    artifact_signal_config = add_random_box_artifacts(
+        artifact_signal_config,
+        count_per_series=box_count_per_series,
+        start_window_seconds=box_start_window_seconds,
+        duration_range_seconds=box_duration_range_seconds,
+        magnitude_fraction=box_magnitude_fraction,
+        channels=(1,),
+        series_numbers=(1,),
+        name="random box artifacts",
+    )
+    artifact_config = SyntheticDoricConfig(
+        series_count=1,
+        session_duration_seconds=session_duration_seconds,
+        inter_series_gap_seconds=inter_series_gap_seconds,
+        fs=fs,
+        channel_count=channel_count,
+        seed=321,
+        signal=artifact_signal_config,
+    )
+
+    artifact_output_path = (
+        notebook_dir / "generated" / "simulator_demonstration_artifacts.doric"
+    )
+    artifact_summary = generate_synthetic_doric(
+        artifact_output_path,
+        artifact_config,
+        overwrite=True,
+    )
+    artifact_dataset = load_doric(artifact_output_path)
+
+    spike_occurrences = [
+        occurrence
+        for occurrence in artifact_summary.artifact_occurrences
+        if occurrence.artifact_type == "session_start_spike"
+        and occurrence.channel_number == 1
+    ]
+    box_occurrences = [
+        occurrence
+        for occurrence in artifact_summary.artifact_occurrences
+        if occurrence.artifact_type == "random_box"
+        and occurrence.channel_number == 1
+    ]
+
+    assert len(spike_occurrences) == 1
+    assert len(box_occurrences) == box_count_per_series
+    return (
+        artifact_dataset,
+        artifact_output_path,
+        box_count_per_series,
+        box_duration_range_seconds,
+        box_magnitude_fraction,
+        box_occurrences,
+        spike_duration_seconds,
+        spike_magnitude_fraction,
+        spike_occurrences,
+    )
+
+
+@app.cell
+def _(
+    artifact_output_path,
+    box_duration_range_seconds,
+    box_magnitude_fraction,
+    box_occurrences,
+    mo,
+    spike_duration_seconds,
+    spike_magnitude_fraction,
+):
+    realized_box_intervals = ", ".join(
+        f"{occurrence.start_seconds_within_series / 60:.2f}"
+        f"–{occurrence.stop_seconds_within_series / 60:.2f}"
+        for occurrence in sorted(
+            box_occurrences,
+            key=lambda occurrence: occurrence.start_sample,
+        )
+    )
+    mo.md(
+        f"""
+        A **{spike_duration_seconds:g} s** session-start spike at
+        **{spike_magnitude_fraction:g}×** each channel's mean was added at
+        the beginning of the recording, followed by
+        **{len(box_occurrences)}** random box artifacts at
+        **{box_magnitude_fraction:g}×** the mean with durations between
+        **{box_duration_range_seconds[0]:g}** and
+        **{box_duration_range_seconds[1]:g} s**.
+
+        Realized box-artifact intervals (minutes): **{realized_box_intervals}**.
+
+        Generated file: `{artifact_output_path}`
+        """
+    )
+    return
+
+
+@app.cell
+def _(
+    artifact_dataset,
+    box_occurrences,
+    go,
+    np,
+    session_duration_seconds,
+    signal_config,
+    spike_occurrences,
+    tonic_amplitude,
+    tonic_frequency_hz,
+):
+    artifact_time_minutes = (
+        artifact_dataset.timestamps[:, 0] - artifact_dataset.timestamps[0, 0]
+    ) / 60
+    artifact_isosbestic = artifact_dataset.isosbestic_405[:, 0, 0]
+    artifact_calcium = artifact_dataset.calcium_465[:, 0, 0]
+    artifact_tonic_reference = (
+        signal_config.calcium_baseline
+        + tonic_amplitude
+        * np.sin(
+            2 * np.pi * tonic_frequency_hz * artifact_dataset.timestamps[:, 0]
+        )
+    )
+    artifact_marker_level = float(np.max(artifact_calcium))
+
+    artifact_figure = go.Figure()
+    for spike_occurrence in spike_occurrences:
+        artifact_figure.add_vrect(
+            x0=spike_occurrence.start_seconds_within_series / 60,
+            x1=spike_occurrence.stop_seconds_within_series / 60,
+            fillcolor="rgba(230, 159, 0, 0.22)",
+            layer="below",
+            line_width=0,
+        )
+    for box_occurrence in box_occurrences:
+        artifact_figure.add_vrect(
+            x0=box_occurrence.start_seconds_within_series / 60,
+            x1=box_occurrence.stop_seconds_within_series / 60,
+            fillcolor="rgba(118, 42, 131, 0.16)",
+            layer="below",
+            line_width=0,
+        )
+
+    artifact_figure.add_scattergl(
+        x=artifact_time_minutes,
+        y=artifact_isosbestic,
+        name="405 nm isosbestic with artifacts",
+        mode="lines",
+        line={"color": "#4575b4", "width": 1.5},
+    )
+    artifact_figure.add_scattergl(
+        x=artifact_time_minutes,
+        y=artifact_tonic_reference,
+        name="Tonic calcium without phasic events",
+        mode="lines",
+        line={"color": "#5f6368", "width": 1.5, "dash": "dot"},
+    )
+    artifact_figure.add_scattergl(
+        x=artifact_time_minutes,
+        y=artifact_calcium,
+        name="465 nm calcium with phasic events and artifacts",
+        mode="lines",
+        line={"color": "#d73027", "width": 1.5},
+    )
+    artifact_figure.add_scatter(
+        x=[
+            occurrence.start_seconds_within_series / 60
+            for occurrence in spike_occurrences
+        ],
+        y=[artifact_marker_level] * len(spike_occurrences),
+        name="Session-start spike",
+        mode="markers",
+        marker={"color": "#e69f00", "size": 10, "symbol": "star"},
+        hovertemplate="%{x:.2f} min<extra>%{fullData.name}</extra>",
+    )
+    artifact_figure.add_scatter(
+        x=[
+            (
+                occurrence.start_seconds_within_series
+                + occurrence.stop_seconds_within_series
+            )
+            / 2
+            / 60
+            for occurrence in box_occurrences
+        ],
+        y=[artifact_marker_level] * len(box_occurrences),
+        name="Random box artifact",
+        mode="markers",
+        marker={"color": "#762a83", "size": 9, "symbol": "square"},
+        hovertemplate="%{x:.2f} min<extra>%{fullData.name}</extra>",
+    )
+    artifact_figure.update_layout(
+        template="plotly_white",
+        title="Session-start spike and random box artifacts",
+        xaxis_title="Time within recording (minutes)",
+        yaxis_title="Signal (V)",
+        legend_title_text="Trace",
+        hovermode="x unified",
+    )
+    artifact_figure = artifact_figure.update_xaxes(
+        range=[0, session_duration_seconds / 60]
+    )
+    return (artifact_figure,)
+
+
+@app.cell
+def _(artifact_figure, mo):
+    mo.ui.plotly(
+        artifact_figure,
         config={"scrollZoom": True, "responsive": True},
     )
     return
