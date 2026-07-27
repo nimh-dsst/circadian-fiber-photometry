@@ -14,7 +14,7 @@ once their scope is clear.
   request.
 - Add an issue or pull-request link to an item when one exists.
 
-Last reviewed: **2026-07-13**. At that review, `uv run pytest` passed all 99
+Last reviewed: **2026-07-27**. At that review, `uv run pytest` passed all 141
 tests and `uv run ruff check .` passed.
 
 ## Feature request inbox
@@ -143,6 +143,52 @@ provides the single-exponential reference `exp(-t / decayTauSamples)`. A
 double-exponential model must use an explicitly documented equation and default
 parameters from an identified reference; do not infer or claim MATLAB
 equivalence for that model.
+
+## ChronoXIV TDT extract simulation
+
+This feature targets the files produced after ChronoXIV batch-processes a TDT
+tank. It does not create TDT's proprietary raw tank files (`.tsq`, `.tev`, or
+related formats). See [TDT_EXTRACT_EXPORT_PLAN.md](TDT_EXTRACT_EXPORT_PLAN.md)
+for the observed contract and implemented design.
+
+- [x] **Document the TDT extract contract** — Record the subject-session
+  directory naming convention, required `streams.json` fields, stream pickle
+  structure, packed stream CSV columns, optional TTL files, and optional
+  `epoc.csv` columns observed in ChronoXIV outputs.
+- [x] **Add a UI-independent TDT extract writer** — Add an `io/tdt.py` module
+  that accepts normalized one-dimensional simulated streams and writes one
+  ChronoXIV-compatible subject-session extraction. Do not claim that it writes
+  or emulates a raw TDT tank.
+- [x] **Write faithful `tdt.StructType` stream pickles** — Use the `tdt` package
+  to serialize the same attribute-backed `tdt.StructType` returned by
+  `tdt.read_block`, including the typed `name`, `code`, `size`, `type`,
+  `type_str`, `ucf`, `fs`, `dform`, `start_time`, `data`, and `channel` fields.
+  Declare `tdt` as an optional export dependency and document that it is also
+  required when these pickles are loaded.
+- [x] **Write legacy packed stream CSV files** — Match the batch extractor's
+  `BLOCK`, `EVENT`, `TIME`, `CHAN`, `Sampling_Freq`, `NumOfPoints`, and
+  `D0`-`D127` layout. Use an explicit, tested policy for sample counts that are
+  not divisible by the 128-sample row width; never trim or pad silently.
+- [x] **Support optional TTL and epoc exports** — Omit TTL files when
+  `ttl_stream` is `"None"`; otherwise require a length-matched TTL stream.
+  Write selected epoc events as `index,onset,offset` and omit `epoc.csv` when
+  the selected epoc is `"None"`.
+- [x] **Map simulator sessions and channels to extracts** — Provide a simulation
+  adapter that can map selected generated series to session datetimes and
+  selected photometry channels to one- or two-subject ChronoXIV extraction
+  directories while preserving simulator ground truth.
+- [x] **Validate metadata and protect outputs** — Validate finite signals,
+  positive sampling rates, equal stream lengths, subject/order consistency,
+  epoc bounds, and `YYYYMMDD-HHMMSS` datetimes before writing. Protect existing
+  directories unless overwrite is explicit, and avoid leaving partial exports
+  after a failed write.
+- [x] **Test the consumer contract** — Add pytest coverage for required and
+  optional files, manifest values, pickle contents, packed CSV reconstruction,
+  two-subject metadata, invalid inputs, overwrite behavior, and loading the
+  generated `tdt.StructType` pickles through the contract used by ChronoXIV.
+- [x] **Expose and document the public API** — Export the stable writer and
+  result/configuration types deliberately, add a README example, and demonstrate
+  an end-to-end synthetic TDT extract in a marimo example.
 
 ## Analysis discovery and result contracts
 

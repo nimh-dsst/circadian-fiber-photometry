@@ -34,6 +34,13 @@ from .photobleaching import (
     SyntheticPhotobleachingConfig,
     SyntheticPhotobleachingMetadata,
 )
+from .tdt import (
+    SyntheticTDTBatchSummary,
+    SyntheticTDTExtractionRecord,
+    SyntheticTDTSubject,
+    build_tdt_epocs_from_behavior_events,
+    export_synthetic_tdt_extracts,
+)
 
 __all__ = [
     "SyntheticArtifactOccurrence",
@@ -54,6 +61,9 @@ __all__ = [
     "SyntheticTTLBehaviorEventConfig",
     "SyntheticTTLBehaviorEventSummary",
     "SyntheticTTLRandomBehaviorEventConfig",
+    "SyntheticTDTBatchSummary",
+    "SyntheticTDTExtractionRecord",
+    "SyntheticTDTSubject",
     "SyntheticTonicComponentConfig",
     "add_gaussian_noise",
     "add_random_box_artifacts",
@@ -63,5 +73,7 @@ __all__ = [
     "add_tonic_component",
     "configure_photometry_disconnection",
     "configure_session_start_spike",
+    "build_tdt_epocs_from_behavior_events",
+    "export_synthetic_tdt_extracts",
     "generate_synthetic_doric",
 ]

@@ -17,11 +17,17 @@ def _(mo):
     # Synthetic photometry artifacts
 
     This focused example adds every artifact model currently available to a
-    clean Doric-style recording: a brief five-sample session-start spike,
+    clean Doric-style recording: a negative session-start spike,
     positive and negative scheduled boxes, fixed-count and rate-driven random
     boxes, and a photometry disconnection. Artifact timing is expressed in
     seconds relative to a series or to the full experiment, depending on the
     configured time reference.
+
+    The session-start artifact uses `magnitude_fraction=-1.0` to subtract the
+    signal mean for the first two seconds. For this constant clean signal, that
+    produces an initial value near zero followed by a sharp rise to the normal
+    recording level, simulating a photometry signal being turned on shortly
+    after recording begins.
     """)
     return
 
@@ -84,8 +90,9 @@ def _(
     )
     artifact_signal = configure_session_start_spike(
         base_signal,
-        duration_seconds=5 / sampling_rate_hz,
-        name="five-sample startup spike",
+        duration_seconds=2.0,
+        magnitude_fraction=-1.0,
+        name="signal switched on after recording starts",
     )
     artifact_signal = add_scheduled_box_artifacts(
         artifact_signal,

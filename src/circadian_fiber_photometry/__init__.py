@@ -7,7 +7,17 @@ are also exported at the package root for compatibility.
 """
 
 from .analyses import ANALYSES, get_analysis, list_analyses, run_analysis
-from .io import DoricFileError, load_doric
+from .io import (
+    DoricFileError,
+    TDTDependencyError,
+    TDTExtractEpoc,
+    TDTExtractError,
+    TDTExtractMetadata,
+    TDTExtractStream,
+    TDTExtractSummary,
+    load_doric,
+    write_tdt_extract,
+)
 from .models import AnalysisResult, AnalysisSpec, DoricDataset
 from .phasic import (
     compute_phasic_level,
@@ -37,6 +47,9 @@ from .simulation import (
     SyntheticRandomCalciumEventConfig,
     SyntheticScheduledCalciumEventConfig,
     SyntheticSignalConfig,
+    SyntheticTDTBatchSummary,
+    SyntheticTDTExtractionRecord,
+    SyntheticTDTSubject,
     SyntheticTonicComponentConfig,
     SyntheticTTLBehaviorCodeConfig,
     SyntheticTTLBehaviorEventConfig,
@@ -46,6 +59,8 @@ from .simulation import (
     add_random_calcium_events,
     add_scheduled_calcium_events,
     add_tonic_component,
+    build_tdt_epocs_from_behavior_events,
+    export_synthetic_tdt_extracts,
     generate_synthetic_doric,
 )
 from .streams import (
@@ -82,11 +97,20 @@ __all__ = [
     "SyntheticRandomCalciumEventConfig",
     "SyntheticScheduledCalciumEventConfig",
     "SyntheticSignalConfig",
+    "SyntheticTDTBatchSummary",
+    "SyntheticTDTExtractionRecord",
+    "SyntheticTDTSubject",
     "SyntheticTTLBehaviorCodeConfig",
     "SyntheticTTLBehaviorEventConfig",
     "SyntheticTTLBehaviorEventSummary",
     "SyntheticTTLRandomBehaviorEventConfig",
     "SyntheticTonicComponentConfig",
+    "TDTDependencyError",
+    "TDTExtractEpoc",
+    "TDTExtractError",
+    "TDTExtractMetadata",
+    "TDTExtractStream",
+    "TDTExtractSummary",
     "TimestampGapReport",
     "add_gaussian_noise",
     "add_random_calcium_events",
@@ -94,6 +118,7 @@ __all__ = [
     "add_tonic_component",
     "analyze_sessions",
     "analyze_stream_pair",
+    "build_tdt_epocs_from_behavior_events",
     "compute_average_level",
     "compute_phasic_level",
     "compute_phasic_trace",
@@ -103,6 +128,7 @@ __all__ = [
     "detect_stream_gaps",
     "detrend_levels_by_moving_window",
     "estimate_interval_hours",
+    "export_synthetic_tdt_extracts",
     "extract_light_pulse_windows",
     "fit_405_to_465",
     "generate_synthetic_doric",
@@ -115,5 +141,6 @@ __all__ = [
     "positive_only",
     "run_analysis",
     "sessionize_stream_pair",
+    "write_tdt_extract",
     "zscore_levels_by_moving_window",
 ]
