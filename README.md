@@ -13,8 +13,7 @@ Development status and planned work are tracked in the
 
 ## Attribution
 
-The original MATLAB scripts were authored by Qijun Tang. The analysis code in
-this repository is intended to support long-term circadian fiber photometry
+The original MATLAB scripts were authored by Jordan N Cook, Jeff R Jones. The analysis code in this repository is intended to support long-term circadian fiber photometry
 workflows, with methodological background and best-practice considerations
 discussed in [Tang et al., "Long-term optical monitoring of genetically encoded
 fluorescent indicators," PNAS Nexus,
