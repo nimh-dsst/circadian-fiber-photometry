@@ -4,11 +4,14 @@ from circadian_fiber_photometry import (
     AnalysisResult,
     DoricDataset,
     SyntheticTDTSubject,
+    TDTBlockStream,
     TDTExtractStream,
+    export_synthetic_tdt_blocks,
     export_synthetic_tdt_extracts,
     list_analyses,
     load_doric,
     run_analysis,
+    write_tdt_block,
     write_tdt_extract,
 )
 from circadian_fiber_photometry.analyses import ANALYSES
@@ -39,8 +42,11 @@ def test_public_reorganized_imports_are_available() -> None:
     assert callable(compute_tonic_level)
     assert callable(generate_synthetic_doric)
     assert TDTExtractStream.__name__ == "TDTExtractStream"
+    assert TDTBlockStream is TDTExtractStream
     assert SyntheticTDTSubject.__name__ == "SyntheticTDTSubject"
+    assert callable(write_tdt_block)
     assert callable(write_tdt_extract)
+    assert callable(export_synthetic_tdt_blocks)
     assert callable(export_synthetic_tdt_extracts)
     assert SyntheticGaussianNoiseConfig.__name__ == "SyntheticGaussianNoiseConfig"
     assert (
@@ -48,10 +54,7 @@ def test_public_reorganized_imports_are_available() -> None:
         == "SyntheticPhotobleachingComponentConfig"
     )
     assert SyntheticPhotobleachingConfig.__name__ == "SyntheticPhotobleachingConfig"
-    assert (
-        SyntheticPhotobleachingMetadata.__name__
-        == "SyntheticPhotobleachingMetadata"
-    )
+    assert SyntheticPhotobleachingMetadata.__name__ == "SyntheticPhotobleachingMetadata"
     assert (
         SyntheticRandomCalciumEventConfig.__name__
         == "SyntheticRandomCalciumEventConfig"

@@ -8,7 +8,13 @@ are also exported at the package root for compatibility.
 
 from .analyses import ANALYSES, get_analysis, list_analyses, run_analysis
 from .io import (
+    TDT_BLOCK_PICKLE_FILENAME,
     DoricFileError,
+    TDTBlockEpoc,
+    TDTBlockError,
+    TDTBlockMetadata,
+    TDTBlockStream,
+    TDTBlockSummary,
     TDTDependencyError,
     TDTExtractEpoc,
     TDTExtractError,
@@ -16,6 +22,7 @@ from .io import (
     TDTExtractStream,
     TDTExtractSummary,
     load_doric,
+    write_tdt_block,
     write_tdt_extract,
 )
 from .models import AnalysisResult, AnalysisSpec, DoricDataset
@@ -48,6 +55,7 @@ from .simulation import (
     SyntheticScheduledCalciumEventConfig,
     SyntheticSignalConfig,
     SyntheticTDTBatchSummary,
+    SyntheticTDTBlockRecord,
     SyntheticTDTExtractionRecord,
     SyntheticTDTSubject,
     SyntheticTonicComponentConfig,
@@ -60,6 +68,7 @@ from .simulation import (
     add_scheduled_calcium_events,
     add_tonic_component,
     build_tdt_epocs_from_behavior_events,
+    export_synthetic_tdt_blocks,
     export_synthetic_tdt_extracts,
     generate_synthetic_doric,
 )
@@ -98,6 +107,7 @@ __all__ = [
     "SyntheticScheduledCalciumEventConfig",
     "SyntheticSignalConfig",
     "SyntheticTDTBatchSummary",
+    "SyntheticTDTBlockRecord",
     "SyntheticTDTExtractionRecord",
     "SyntheticTDTSubject",
     "SyntheticTTLBehaviorCodeConfig",
@@ -105,6 +115,12 @@ __all__ = [
     "SyntheticTTLBehaviorEventSummary",
     "SyntheticTTLRandomBehaviorEventConfig",
     "SyntheticTonicComponentConfig",
+    "TDT_BLOCK_PICKLE_FILENAME",
+    "TDTBlockEpoc",
+    "TDTBlockError",
+    "TDTBlockMetadata",
+    "TDTBlockStream",
+    "TDTBlockSummary",
     "TDTDependencyError",
     "TDTExtractEpoc",
     "TDTExtractError",
@@ -128,6 +144,7 @@ __all__ = [
     "detect_stream_gaps",
     "detrend_levels_by_moving_window",
     "estimate_interval_hours",
+    "export_synthetic_tdt_blocks",
     "export_synthetic_tdt_extracts",
     "extract_light_pulse_windows",
     "fit_405_to_465",
@@ -141,6 +158,7 @@ __all__ = [
     "positive_only",
     "run_analysis",
     "sessionize_stream_pair",
+    "write_tdt_block",
     "write_tdt_extract",
     "zscore_levels_by_moving_window",
 ]

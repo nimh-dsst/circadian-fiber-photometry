@@ -36,9 +36,11 @@ from .photobleaching import (
 )
 from .tdt import (
     SyntheticTDTBatchSummary,
+    SyntheticTDTBlockRecord,
     SyntheticTDTExtractionRecord,
     SyntheticTDTSubject,
     build_tdt_epocs_from_behavior_events,
+    export_synthetic_tdt_blocks,
     export_synthetic_tdt_extracts,
 )
 
@@ -62,6 +64,7 @@ __all__ = [
     "SyntheticTTLBehaviorEventSummary",
     "SyntheticTTLRandomBehaviorEventConfig",
     "SyntheticTDTBatchSummary",
+    "SyntheticTDTBlockRecord",
     "SyntheticTDTExtractionRecord",
     "SyntheticTDTSubject",
     "SyntheticTonicComponentConfig",
@@ -74,6 +77,7 @@ __all__ = [
     "configure_photometry_disconnection",
     "configure_session_start_spike",
     "build_tdt_epocs_from_behavior_events",
+    "export_synthetic_tdt_blocks",
     "export_synthetic_tdt_extracts",
     "generate_synthetic_doric",
 ]

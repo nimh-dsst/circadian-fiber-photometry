@@ -14,12 +14,12 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Simulated ChronoXIV TDT extracts
+    # Simulated TDT read-block objects
 
     This example generates a small Doric-style dataset and exports its
-    normalized streams into the files ChronoXIV creates after TDT batch
-    extraction. The output is not a proprietary TDT tank and cannot be opened
-    as `.tsq` or `.tev` data.
+    normalized streams into a pickle with the structure returned by
+    `tdt.read_block`. The output is not a proprietary TDT tank and cannot be
+    opened as `.tsq` or `.tev` data.
 
     Install the package with its `tdt-export` extra before running the notebook.
     Generated files live in a temporary directory and are removed when the
@@ -30,7 +30,6 @@ def _(mo):
 
 @app.cell
 def _():
-    import json
     import pickle
     from datetime import datetime
     from pathlib import Path
@@ -40,7 +39,7 @@ def _():
     from circadian_fiber_photometry.simulation import (
         SyntheticDoricConfig,
         SyntheticTDTSubject,
-        export_synthetic_tdt_extracts,
+        export_synthetic_tdt_blocks,
         generate_synthetic_doric,
     )
 
@@ -50,9 +49,8 @@ def _():
         SyntheticTDTSubject,
         TemporaryDirectory,
         datetime,
-        export_synthetic_tdt_extracts,
+        export_synthetic_tdt_blocks,
         generate_synthetic_doric,
-        json,
         load_doric,
         pickle,
     )
@@ -65,11 +63,11 @@ def _(
     SyntheticTDTSubject,
     TemporaryDirectory,
     datetime,
-    export_synthetic_tdt_extracts,
+    export_synthetic_tdt_blocks,
     generate_synthetic_doric,
     load_doric,
 ):
-    temporary_directory = TemporaryDirectory(prefix="tdt-extract-example-")
+    temporary_directory = TemporaryDirectory(prefix="tdt-block-example-")
     output_root = Path(temporary_directory.name)
     doric_path = output_root / "source.doric"
     generation_summary = generate_synthetic_doric(
@@ -84,7 +82,7 @@ def _(
         ),
     )
     dataset = load_doric(doric_path)
-    batch_summary = export_synthetic_tdt_extracts(
+    batch_summary = export_synthetic_tdt_blocks(
         output_root / "experiment",
         dataset,
         cohort="Cohort 1",
@@ -94,6 +92,7 @@ def _(
                 channel_number=1,
                 isosbestic_store_name="405A",
                 experimental_store_name="470d",
+                site="vta",
             ),
         ),
         base_datetime=datetime(2025, 1, 1, 12, 0, 0),
@@ -108,12 +107,11 @@ def _(
 
 
 @app.cell
-def _(batch_summary, dataset, generation_summary, json, pickle):
+def _(batch_summary, dataset, generation_summary, pickle):
     first_record = batch_summary.records[0]
-    manifest_path = first_record.summary.path / "streams.json"
-    manifest = json.loads(manifest_path.read_text())
-    with (first_record.summary.path / "exp_stream.pkl").open("rb") as file_in:
-        experimental_stream = pickle.load(file_in)
+    with first_record.summary.block_file.open("rb") as file_in:
+        block = pickle.load(file_in)
+    experimental_stream = block.streams._470d
 
     assert batch_summary.extracted_count == dataset.series_count
     assert generation_summary.samples_per_series == 256
@@ -132,11 +130,11 @@ def _(batch_summary, dataset, generation_summary, json, pickle):
         "data",
         "channel",
     ]
-    return experimental_stream, first_record, manifest
+    return block, experimental_stream, first_record
 
 
 @app.cell
-def _(batch_summary, experimental_stream, first_record, manifest, mo):
+def _(batch_summary, block, experimental_stream, first_record, mo):
     mo.vstack(
         [
             mo.md("## Exported subject sessions"),
@@ -154,8 +152,8 @@ def _(batch_summary, experimental_stream, first_record, manifest, mo):
             ),
             mo.md(
                 f"""
-                The first manifest selects `{manifest["iso_stream"]}` and
-                `{manifest["exp_stream"]}`. Its experimental pickle is a
+                The pickle root contains
+                `{", ".join(block.keys())}`. Its experimental stream is a
                 `{experimental_stream.__class__.__module__}.`
                 `{experimental_stream.__class__.__name__}` with
                 `{experimental_stream.data.size}` float32 samples.

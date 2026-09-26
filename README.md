@@ -5,8 +5,8 @@ A Python library of analysis code for circadian fiber photometry experiments
 This package converts the analysis portions of the legacy MATLAB scripts in
 `matlab_scripts/` to Python. It can load Doric-style HDF5 files, generate
 synthetic Doric HDF5 files with plausible photometry traces for tests and
-simulations, export simulated streams in ChronoXIV's post-extraction TDT
-format, and run tonic or phasic analyses through plain Python APIs.
+simulations, export simulated `tdt.read_block` objects, and run tonic or phasic
+analyses through plain Python APIs.
 
 Development status and planned work are tracked in the
 [feature checklist](FEATURE_CHECKLIST.md).
@@ -30,7 +30,7 @@ Pin a tag or commit from your application:
 uv add "circadian-fiber-photometry @ git+https://github.com/nimh-dsst/circadian-fiber-photometry.git@<tag-or-commit>"
 ```
 
-Install the optional TDT export support when simulated ChronoXIV extracts are
+Install the optional TDT export support when simulated read-block pickles are
 needed:
 
 ```bash
@@ -42,10 +42,10 @@ uv add "circadian-fiber-photometry[tdt-export] @ git+https://github.com/nimh-dss
 The package uses a `src/` layout and separates I/O, simulation, and analysis
 logic:
 
-- `circadian_fiber_photometry.io`: Doric HDF5 loading and ChronoXIV TDT extract
+- `circadian_fiber_photometry.io`: Doric HDF5 loading and simulated TDT block
   writing.
 - `circadian_fiber_photometry.simulation`: synthetic Doric HDF5 generation and
-  adapters for simulated TDT extracts.
+  adapters for simulated TDT blocks.
 - `circadian_fiber_photometry.analyses`: discoverable tonic and phasic analysis
   registry.
 - `circadian_fiber_photometry.tonic`: global 405-to-465 fitting, tonic
@@ -89,7 +89,7 @@ regression.
 
 The package exposes:
 
-- I/O: `load_doric`, `write_tdt_extract`
+- I/O: `load_doric`, `write_tdt_block`
 - Registry: `list_analyses`, `run_analysis`
 - Tonic: `fit_405_to_465`, `compute_tonic_level`,
   `detrend_levels_by_moving_window`, `zscore_levels_by_moving_window`
@@ -102,7 +102,7 @@ The package exposes:
   `add_scheduled_calcium_events`, `add_random_calcium_events`,
   `add_gaussian_noise`, `configure_session_start_spike`,
   `add_scheduled_box_artifacts`, `add_random_box_artifacts`,
-  `export_synthetic_tdt_extracts`
+  `export_synthetic_tdt_blocks`
 
 Modular imports are available when you want to build custom pipelines:
 
@@ -223,15 +223,15 @@ Tonic components are additive calcium-channel sinusoids with amplitude and
 frequency controls. Scheduled calcium events use seconds relative to each
 series start; random calcium events are seeded from `SyntheticDoricConfig.seed`.
 
-## Synthetic ChronoXIV TDT extracts
+## Synthetic TDT read-block objects
 
-The optional TDT exporter creates the subject-session directory produced
-*after* ChronoXIV batch-processes a TDT tank. It does not create proprietary
-TDT `.tsq`, `.tev`, or `.tbk` files and is not intended for import into TDT
-software.
+The optional TDT exporter creates a protocol-4 pickle containing the same
+top-level `tdt.StructType` shape returned by `tdt.read_block`. It does not
+create proprietary TDT `.tsq`, `.tev`, or `.tbk` files and is not intended for
+import into TDT software.
 
 Generate and load a synthetic Doric dataset, then map its series and channels
-to ChronoXIV extraction directories:
+to simulated TDT recording directories:
 
 ```python
 from datetime import datetime
@@ -241,7 +241,7 @@ from circadian_fiber_photometry import load_doric
 from circadian_fiber_photometry.simulation import (
     SyntheticDoricConfig,
     SyntheticTDTSubject,
-    export_synthetic_tdt_extracts,
+    export_synthetic_tdt_blocks,
     generate_synthetic_doric,
 )
 
@@ -259,7 +259,7 @@ generate_synthetic_doric(
 )
 dataset = load_doric(doric_path)
 
-batch = export_synthetic_tdt_extracts(
+batch = export_synthetic_tdt_blocks(
     "synthetic-experiment",
     dataset,
     cohort="Cohort 1",
@@ -269,6 +269,7 @@ batch = export_synthetic_tdt_extracts(
             channel_number=1,
             isosbestic_store_name="405A",
             experimental_store_name="470d",
+            site="vta",
         ),
     ),
     base_datetime=datetime(2025, 1, 1, 12, 0, 0),
@@ -278,23 +279,22 @@ print([record.summary.path for record in batch.records])
 ```
 
 The result contains one
-`Photometry/<cohort>/Analysis/<subject>_<datetime>` directory per selected
-subject and series. Each required signal is written as a faithful
-`tdt.StructType` protocol-4 pickle and a ChronoXIV packed CSV with 128 samples
-per row. Store names must encode to exactly four CP437 bytes; names beginning
-with a digit are sanitized by `tdt.fix_var_name`, so `"470d"` becomes
-`"_470d"` in the pickle and `streams.json`.
+`Photometry/<cohort>/Simulated TDT/<subject>__<site>__<sex>-<datetime>`
+directory per selected subject and series. Each directory contains only
+`tdt_block.pkl`.
+The pickle root and its `streams`, `epocs`, `snips`, `scalars`, and `info`
+members are `tdt.StructType` instances. Store names must encode to exactly four
+CP437 bytes; names beginning with a digit are sanitized by `tdt.fix_var_name`,
+so `"470d"` becomes `"_470d"` under `block.streams`.
 
-Selected DigitalIO streams can be exported as TTL streams, and
-`build_tdt_epocs_from_behavior_events` converts simulator TTL behavior
-ground truth into per-series `epoc.csv` inputs. Stream lengths must be
-divisible by 128 because the first format version rejects remainders rather
-than silently trimming or padding them.
+Selected DigitalIO streams can be included under `block.streams`, and
+`build_tdt_epocs_from_behavior_events` converts simulator TTL behavior ground
+truth into stores under `block.epocs`.
 
 These pickle files require the `tdt-export` extra when written or loaded.
 `tdt.StructType` stores values as attributes despite subclassing `dict`, so it
-must not be normalized with `dict(stream)` or accessed through inherited
-`dict.get`. As with all pickle files, load extracts only from trusted sources.
+must not be normalized with `dict(block)` or accessed through inherited
+`dict.get`. As with all pickle files, load blocks only from trusted sources.
 
 ### Photobleaching
 

@@ -1,4 +1,4 @@
-"""Adapters from normalized simulated datasets to ChronoXIV TDT extracts."""
+"""Adapters from normalized simulated datasets to pickled TDT blocks."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from ..io.tdt import (
     TDTExtractMetadata,
     TDTExtractStream,
     TDTExtractSummary,
-    write_tdt_extract,
+    write_tdt_block,
 )
 from ..models import DoricDataset
 from .doric import SyntheticTTLBehaviorEventSummary
@@ -25,7 +25,7 @@ from .doric import SyntheticTTLBehaviorEventSummary
 
 @dataclass(frozen=True)
 class SyntheticTDTSubject:
-    """Map one Doric photometry channel to one simulated TDT subject."""
+    """Map one Doric photometry channel to one simulated TDT recording."""
 
     subject_id: str
     channel_number: int
@@ -34,11 +34,13 @@ class SyntheticTDTSubject:
     ttl_source: str | None = None
     ttl_store_name: str | None = None
     epocs_by_series: Mapping[int, TDTExtractEpoc] = field(default_factory=dict)
+    site: str | None = None
+    sex: str = "U"
 
 
 @dataclass(frozen=True)
 class SyntheticTDTExtractionRecord:
-    """Provenance for one subject/series extraction."""
+    """Provenance for one subject/series TDT block."""
 
     summary: TDTExtractSummary
     subject_id: str
@@ -49,11 +51,12 @@ class SyntheticTDTExtractionRecord:
     tank_dir: Path
     ttl_source: str | None
     epoc: TDTExtractEpoc | None
+    site: str | None
 
 
 @dataclass(frozen=True)
 class SyntheticTDTBatchSummary:
-    """Summary of a multi-series simulated TDT export."""
+    """Summary of a multi-series simulated TDT block export."""
 
     output_root: Path
     cohort: str
@@ -61,12 +64,12 @@ class SyntheticTDTBatchSummary:
 
     @property
     def extracted_count(self) -> int:
-        """Number of subject-session extraction directories written."""
+        """Number of subject-session recording directories written."""
 
         return len(self.records)
 
 
-def export_synthetic_tdt_extracts(
+def export_synthetic_tdt_blocks(
     output_root: str | Path,
     dataset: DoricDataset,
     *,
@@ -79,7 +82,7 @@ def export_synthetic_tdt_extracts(
     points_per_row: int = DEFAULT_POINTS_PER_ROW,
     overwrite: bool = False,
 ) -> SyntheticTDTBatchSummary:
-    """Export selected Doric series/channels as ChronoXIV TDT extracts.
+    """Export selected Doric series/channels as pickled TDT read-block objects.
 
     ``base_datetime`` is the wall-clock datetime of the dataset's first series.
     Later session datetimes retain the offsets in
@@ -98,14 +101,9 @@ def export_synthetic_tdt_extracts(
         dataset.series_count,
     )
     subject_configs = _normalize_subjects(subjects, dataset, selected_series)
-    points = _positive_integer(points_per_row, "points_per_row")
-    if dataset.samples_per_series % points != 0:
-        raise TDTExtractError(
-            f"dataset sample count {dataset.samples_per_series} is not divisible "
-            f"by points_per_row={points}"
-        )
+    _positive_integer(points_per_row, "points_per_row")
 
-    analysis_dir = root / "Photometry" / cohort_name / "Analysis"
+    inbox_dir = root / "Photometry" / cohort_name / "Simulated TDT"
     logical_tank_root = (
         Path(tank_dir_root).expanduser()
         if tank_dir_root is not None
@@ -115,8 +113,7 @@ def export_synthetic_tdt_extracts(
     series_datetimes = _series_datetimes(dataset, base_datetime, selected_series)
 
     targets = [
-        analysis_dir
-        / f"{subject.subject_id}_{series_datetimes[series_number]:%Y%m%d-%H%M%S}"
+        inbox_dir / _recording_name(subject, series_datetimes[series_number])
         for series_number in selected_series
         for subject in subject_configs
     ]
@@ -158,11 +155,8 @@ def export_synthetic_tdt_extracts(
                 tank_dir=logical_tank_dir,
                 block_name=block_name,
             )
-            target = (
-                analysis_dir
-                / f"{subject.subject_id}_{session_datetime:%Y%m%d-%H%M%S}"
-            )
-            summary = write_tdt_extract(
+            target = inbox_dir / _recording_name(subject, session_datetime)
+            summary = write_tdt_block(
                 target,
                 isosbestic=TDTExtractStream(
                     store_name=subject.isosbestic_store_name,
@@ -177,7 +171,6 @@ def export_synthetic_tdt_extracts(
                 ttl=ttl,
                 epoc=epoc,
                 metadata=metadata,
-                points_per_row=points,
                 overwrite=overwrite,
             )
             records.append(
@@ -191,6 +184,7 @@ def export_synthetic_tdt_extracts(
                     tank_dir=logical_tank_dir,
                     ttl_source=subject.ttl_source,
                     epoc=epoc,
+                    site=subject.site,
                 )
             )
 
@@ -199,6 +193,12 @@ def export_synthetic_tdt_extracts(
         cohort=cohort_name,
         records=tuple(records),
     )
+
+
+# Compatibility names retained for callers of the original, incorrectly named
+# post-extraction API.
+export_synthetic_tdt_extracts = export_synthetic_tdt_blocks
+SyntheticTDTBlockRecord = SyntheticTDTExtractionRecord
 
 
 def build_tdt_epocs_from_behavior_events(
@@ -221,8 +221,7 @@ def build_tdt_epocs_from_behavior_events(
     pulse_width = _positive_real(pulse_width_seconds, "pulse_width_seconds")
     selected_codes = None if code_names is None else set(code_names)
     if selected_codes is not None and any(
-        not isinstance(code_name, str) or not code_name
-        for code_name in selected_codes
+        not isinstance(code_name, str) or not code_name for code_name in selected_codes
     ):
         raise TDTExtractError("code_names must contain nonempty strings")
 
@@ -290,17 +289,13 @@ def _normalize_series_numbers(
 ) -> tuple[int, ...]:
     if values is None:
         return tuple(range(1, series_count + 1))
-    normalized = tuple(
-        _positive_integer(value, "series number") for value in values
-    )
+    normalized = tuple(_positive_integer(value, "series number") for value in values)
     if not normalized:
         raise TDTExtractError("series_numbers must not be empty")
     if len(set(normalized)) != len(normalized):
         raise TDTExtractError("series_numbers must be unique")
     if any(value > series_count for value in normalized):
-        raise TDTExtractError(
-            f"series_numbers must be between 1 and {series_count}"
-        )
+        raise TDTExtractError(f"series_numbers must be between 1 and {series_count}")
     return normalized
 
 
@@ -313,8 +308,7 @@ def _normalize_subjects(
     if not normalized or len(normalized) > 2:
         raise TDTExtractError("subjects must contain one or two mappings")
     subject_ids = [
-        _safe_component(subject.subject_id, "subject_id")
-        for subject in normalized
+        _safe_component(subject.subject_id, "subject_id") for subject in normalized
     ]
     if len(set(subject_ids)) != len(subject_ids):
         raise TDTExtractError("subject IDs must be unique")
@@ -327,6 +321,10 @@ def _normalize_subjects(
                 f"channel_number must be between 1 and {dataset.channel_count}"
             )
         channels.append(channel)
+        if subject.site is not None:
+            _safe_component(subject.site, "site")
+        if subject.sex not in {"M", "F", "U", "O"}:
+            raise TDTExtractError("sex must be one of 'M', 'F', 'U', or 'O'")
         _validate_store_name(subject.isosbestic_store_name, "isosbestic_store_name")
         _validate_store_name(
             subject.experimental_store_name,
@@ -349,8 +347,7 @@ def _normalize_subjects(
         )
         if invalid_epoc_series:
             raise TDTExtractError(
-                f"epoc series number is outside the dataset: "
-                f"{min(invalid_epoc_series)}"
+                f"epoc series number is outside the dataset: {min(invalid_epoc_series)}"
             )
         for epoc in subject.epocs_by_series.values():
             if not isinstance(epoc, TDTExtractEpoc):
@@ -374,6 +371,22 @@ def _series_datetimes(
         + timedelta(seconds=float(starts[series_number - 1]) - first_start)
         for series_number in selected_series
     }
+
+
+def _recording_name(
+    subject: SyntheticTDTSubject,
+    session_datetime: datetime,
+) -> str:
+    subject_id = _safe_component(subject.subject_id, "subject_id")
+    site = (
+        "unspecified"
+        if subject.site is None
+        else _safe_component(
+            subject.site,
+            "site",
+        ).replace("_", "-")
+    )
+    return f"{subject_id}__{site}__{subject.sex}-{session_datetime:%Y%m%d-%H%M%S}"
 
 
 def _validate_store_name(value: object, label: str) -> str:
@@ -422,8 +435,10 @@ def _positive_real(value: object, label: str) -> float:
 
 __all__ = [
     "SyntheticTDTBatchSummary",
+    "SyntheticTDTBlockRecord",
     "SyntheticTDTExtractionRecord",
     "SyntheticTDTSubject",
     "build_tdt_epocs_from_behavior_events",
+    "export_synthetic_tdt_blocks",
     "export_synthetic_tdt_extracts",
 ]
