@@ -3,11 +3,14 @@ from __future__ import annotations
 from circadian_fiber_photometry import (
     AnalysisResult,
     DoricDataset,
+    SyntheticBehaviorConfig,
+    SyntheticBehaviorEventConfig,
     SyntheticTDTSubject,
     TDTBlockStream,
     TDTExtractStream,
     export_synthetic_tdt_blocks,
     export_synthetic_tdt_extracts,
+    generate_synthetic_behavior_csv,
     list_analyses,
     load_doric,
     run_analysis,
@@ -36,11 +39,14 @@ from circadian_fiber_photometry.simulation import (
 def test_public_reorganized_imports_are_available() -> None:
     assert AnalysisResult.__name__ == "AnalysisResult"
     assert DoricDataset.__name__ == "DoricDataset"
+    assert SyntheticBehaviorConfig.__name__ == "SyntheticBehaviorConfig"
+    assert SyntheticBehaviorEventConfig.__name__ == "SyntheticBehaviorEventConfig"
     assert callable(load_doric)
     assert callable(run_analysis)
     assert callable(count_events)
     assert callable(compute_tonic_level)
     assert callable(generate_synthetic_doric)
+    assert callable(generate_synthetic_behavior_csv)
     assert TDTExtractStream.__name__ == "TDTExtractStream"
     assert TDTBlockStream is TDTExtractStream
     assert SyntheticTDTSubject.__name__ == "SyntheticTDTSubject"

@@ -6,7 +6,8 @@ This package converts the analysis portions of the legacy MATLAB scripts in
 `matlab_scripts/` to Python. It can load Doric-style HDF5 files, generate
 synthetic Doric HDF5 files with plausible photometry traces for tests and
 simulations, export simulated `tdt.read_block` objects, and run tonic or phasic
-analyses through plain Python APIs.
+analyses through plain Python APIs. It can also create raw synthetic behavior
+CSVs for downstream tools such as ChronoXIV.
 
 Development status and planned work are tracked in the
 [feature checklist](FEATURE_CHECKLIST.md).
@@ -46,6 +47,9 @@ logic:
   writing.
 - `circadian_fiber_photometry.simulation`: synthetic Doric HDF5 generation and
   adapters for simulated TDT blocks.
+- `circadian_fiber_photometry.behavior`: synthetic raw behavior tables with
+  scheduled point events, single-binary intervals, paired onset/offset
+  intervals, and numeric co-metrics.
 - `circadian_fiber_photometry.analyses`: discoverable tonic and phasic analysis
   registry.
 - `circadian_fiber_photometry.tonic`: global 405-to-465 fitting, tonic
@@ -55,7 +59,8 @@ logic:
   light-pulse windows.
 
 The root package re-exports common functions for compatibility. New code should
-prefer `io`, `simulation`, and `analyses` for package-level workflows.
+prefer `io`, `simulation`, `behavior`, and `analyses` for package-level
+workflows.
 
 ## Usage
 
@@ -102,7 +107,7 @@ The package exposes:
   `add_scheduled_calcium_events`, `add_random_calcium_events`,
   `add_gaussian_noise`, `configure_session_start_spike`,
   `add_scheduled_box_artifacts`, `add_random_box_artifacts`,
-  `export_synthetic_tdt_blocks`
+  `export_synthetic_tdt_blocks`, `generate_synthetic_behavior_csv`
 
 Modular imports are available when you want to build custom pipelines:
 
@@ -112,6 +117,54 @@ from circadian_fiber_photometry.analyses import list_analyses, run_analysis
 from circadian_fiber_photometry.phasic import count_events, irls_dynamic_correction
 from circadian_fiber_photometry.tonic import fit_405_to_465, compute_tonic_level
 ```
+
+## Synthetic behavior CSVs
+
+The behavior simulator writes raw upload tables rather than ChronoXIV-owned
+normalized outputs such as `behavior.csv` and `behavior_data.json`. Event type,
+role, and output names are returned as mapping hints in the generation summary.
+
+```python
+from circadian_fiber_photometry.behavior import (
+    EVENT_ROLE_INTERVAL,
+    EVENT_TYPE_STRUCTURED,
+    EVENT_TYPE_UNSTRUCTURED,
+    SOURCE_FORMAT_PAIRED_ONSET_OFFSET,
+    SyntheticBehaviorConfig,
+    SyntheticBehaviorEventConfig,
+    generate_synthetic_behavior_csv,
+)
+
+config = SyntheticBehaviorConfig(
+    duration_seconds=660,
+    sampling_rate_hz=30,
+    events=(
+        SyntheticBehaviorEventConfig(
+            output_column="Freezing",
+            event_type=EVENT_TYPE_UNSTRUCTURED,
+            event_role=EVENT_ROLE_INTERVAL,
+            intervals_seconds=((18.25, 20.30), (64.17, 67.90)),
+        ),
+        SyntheticBehaviorEventConfig(
+            output_column="CS+ active",
+            event_type=EVENT_TYPE_STRUCTURED,
+            event_role=EVENT_ROLE_INTERVAL,
+            source_format=SOURCE_FORMAT_PAIRED_ONSET_OFFSET,
+            onset_column="CS+ ON activated",
+            offset_column="CS + OFF activated",
+            intervals_seconds=((120, 150), (300, 330), (480, 510)),
+        ),
+    ),
+)
+
+summary = generate_synthetic_behavior_csv("mouse_behavior.csv", config)
+print(summary.event_mappings)
+```
+
+Inactive event samples are written as explicit `0` values. Missing numeric
+co-metric values are written as blank cells. See
+`examples/behavior_simulation.py` for position, speed, state, and paired event
+columns similar to a typical behavior export.
 
 ## Synthetic Doric files
 

@@ -7,6 +7,19 @@ are also exported at the package root for compatibility.
 """
 
 from .analyses import ANALYSES, get_analysis, list_analyses, run_analysis
+from .behavior import (
+    SyntheticBehaviorCoMetricConfig,
+    SyntheticBehaviorConfig,
+    SyntheticBehaviorDataset,
+    SyntheticBehaviorEventConfig,
+    SyntheticBehaviorEventMapping,
+    SyntheticBehaviorOccurrence,
+    SyntheticBehaviorSummary,
+    build_behavior_event_configs_from_ttl,
+    generate_synthetic_behavior_csv,
+    simulate_behavior,
+    write_behavior_csv,
+)
 from .io import (
     TDT_BLOCK_PICKLE_FILENAME,
     DoricFileError,
@@ -102,6 +115,13 @@ __all__ = [
     "SessionizedStreamPair",
     "SyntheticDoricConfig",
     "SyntheticDoricSummary",
+    "SyntheticBehaviorCoMetricConfig",
+    "SyntheticBehaviorConfig",
+    "SyntheticBehaviorDataset",
+    "SyntheticBehaviorEventConfig",
+    "SyntheticBehaviorEventMapping",
+    "SyntheticBehaviorOccurrence",
+    "SyntheticBehaviorSummary",
     "SyntheticGaussianNoiseConfig",
     "SyntheticRandomCalciumEventConfig",
     "SyntheticScheduledCalciumEventConfig",
@@ -135,6 +155,7 @@ __all__ = [
     "analyze_sessions",
     "analyze_stream_pair",
     "build_tdt_epocs_from_behavior_events",
+    "build_behavior_event_configs_from_ttl",
     "compute_average_level",
     "compute_phasic_level",
     "compute_phasic_trace",
@@ -149,6 +170,7 @@ __all__ = [
     "extract_light_pulse_windows",
     "fit_405_to_465",
     "generate_synthetic_doric",
+    "generate_synthetic_behavior_csv",
     "get_analysis",
     "integrated_fluorescence",
     "irls_dynamic_correction",
@@ -158,7 +180,9 @@ __all__ = [
     "positive_only",
     "run_analysis",
     "sessionize_stream_pair",
+    "simulate_behavior",
     "write_tdt_block",
     "write_tdt_extract",
+    "write_behavior_csv",
     "zscore_levels_by_moving_window",
 ]
