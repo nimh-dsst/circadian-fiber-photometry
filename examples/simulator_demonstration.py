@@ -726,7 +726,6 @@ def _(
     inter_series_gap_seconds,
     load_doric,
     notebook_dir,
-    np,
     random_phasic_signal_config,
     session_duration_seconds,
 ):
@@ -780,25 +779,23 @@ def _(
     mo,
     noisy_phasic_output_path,
 ):
-    mo.md(
-        f"""
-        The recorded channels now carry additive Gaussian noise with a
-        **{gaussian_noise_calcium_std:g} V** standard deviation on the 465 nm
-        calcium stream and **{gaussian_noise_isosbestic_std:g} V** on the
-        405 nm isosbestic stream.
+    mo.md(f"""
+    The recorded channels now carry additive Gaussian noise with a
+    **{gaussian_noise_calcium_std:g} V** standard deviation on the 465 nm
+    calcium stream and **{gaussian_noise_isosbestic_std:g} V** on the
+    405 nm isosbestic stream.
 
-        Generated file: `{noisy_phasic_output_path}`
-        """
-    )
+    Generated file: `{noisy_phasic_output_path}`
+    """)
     return
 
 
 @app.cell
 def _(
     go,
-    np,
     noisy_phasic_dataset,
     noisy_phasic_event_times_minutes,
+    np,
     session_duration_seconds,
     signal_config,
     tonic_amplitude,
@@ -978,7 +975,6 @@ def _(
     return (
         artifact_dataset,
         artifact_output_path,
-        box_count_per_series,
         box_duration_range_seconds,
         box_magnitude_fraction,
         box_occurrences,
