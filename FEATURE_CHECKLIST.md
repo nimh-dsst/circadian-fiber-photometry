@@ -31,7 +31,7 @@ Copy this line for each new request:
 - [x] Keep core analysis code independent of Streamlit and other UI frameworks.
 - [x] Keep core dependencies limited to NumPy, SciPy, and h5py.
 - [x] Preserve the original MATLAB files separately under `matlab_scripts/`.
-- [x] Credit Qijun Tang for the original MATLAB work in the README.
+- [x] Credit Jordan N Cook and Jeff R Jones for the original MATLAB work in the README.
 - [x] Expose a small root API for loading, simulation, analysis, and result
   objects.
 - [x] Support modular imports from `io`, `simulation`, `analyses`, `tonic`, and

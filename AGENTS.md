@@ -29,7 +29,7 @@ The Python package should be developed as an independent scientific analysis eng
 
 ## MATLAB Source Preservation
 
-The `matlab_scripts/` folder houses unedited MATLAB scripts by Qijun Tang.
+The `matlab_scripts/` folder houses unedited MATLAB scripts by Jordan N Cook and Jeff R Jones.
 
 These files should remain faithful to the original source material.
 
