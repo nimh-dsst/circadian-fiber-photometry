@@ -37,6 +37,17 @@ def normalize_session_array(
     raise ValueError(f"{name} must be {expected}; got shape {array.shape}")
 
 
+def restore_session_array(values: np.ndarray, kind: ArrayKind) -> np.ndarray:
+    """Restore a normalized session array to its original dimensionality."""
+
+    array = np.asarray(values)
+    if kind == "trace":
+        return array[:, 0, 0]
+    if kind == "single_channel_sessions":
+        return array[:, 0, :]
+    return array
+
+
 def require_matching_shapes(left: np.ndarray, right: np.ndarray) -> None:
     """Raise when normalized session arrays differ in shape."""
 

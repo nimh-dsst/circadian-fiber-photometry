@@ -18,6 +18,11 @@ dependencies = [
   "scipy>=1.10",
 ]
 
+[project.optional-dependencies]
+tdt-export = [
+  "tdt>=0.7.3",
+]
+
 [project.urls]
 Repository = "https://github.com/nimh-dsst/circadian-fiber-photometry"
 
@@ -25,6 +30,14 @@ Repository = "https://github.com/nimh-dsst/circadian-fiber-photometry"
 dev = [
   "pytest>=8.0",
   "ruff>=0.6",
+  "tdt>=0.7.3",
+]
+notebooks = [
+  "ipykernel>=7.3.0",
+  "jupyterlab>=4.6.1",
+  "marimo>=0.23.13",
+  "plotly>=6.8.0",
+  "plotly-resampler>=0.11.0",
 ]
 
 [tool.hatch.build.targets.wheel]

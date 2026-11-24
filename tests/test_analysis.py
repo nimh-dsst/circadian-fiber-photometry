@@ -13,6 +13,16 @@ from circadian_fiber_photometry import (
     irls_dynamic_correction,
     sessionize_stream_pair,
 )
+from circadian_fiber_photometry.phasic import (
+    compute_phasic_level,
+    compute_phasic_trace,
+    integrated_fluorescence,
+)
+from circadian_fiber_photometry.tonic import (
+    compute_tonic_level,
+    detrend_levels_by_moving_window,
+    zscore_levels_by_moving_window,
+)
 
 
 def test_count_events_returns_no_events_for_flat_signal() -> None:
@@ -55,6 +65,43 @@ def test_count_events_threshold_matches_matlab_rule() -> None:
 
     assert result.threshold == pytest.approx(expected_threshold)
     assert result.count == 1
+
+
+def test_phasic_metric_functions_are_importable_and_modular() -> None:
+    signal = np.array(
+        [
+            [0.0, 1.0],
+            [1.0, 2.0],
+            [2.0, 3.0],
+        ]
+    )
+
+    phasic = compute_phasic_trace(signal, percentile=0)
+
+    assert phasic.shape == signal.shape
+    assert phasic[:, 0] == pytest.approx([0.0, 1.0, 2.0])
+    assert compute_phasic_level(signal, percentile=0).shape == (1, 2)
+    assert integrated_fluorescence(phasic, axis=0) == pytest.approx([3.0, 3.0])
+
+
+def test_tonic_metric_functions_are_importable_and_modular() -> None:
+    levels = np.array([[1.0, 2.0, 3.0, 4.0]])
+
+    tonic = compute_tonic_level(np.arange(12, dtype=float).reshape(3, 4))
+    detrended = detrend_levels_by_moving_window(
+        levels,
+        interval_hours=1,
+        window_hours=2,
+    )
+    zscored = zscore_levels_by_moving_window(
+        levels,
+        interval_hours=1,
+        window_hours=2,
+    )
+
+    assert tonic.shape == (1, 4)
+    assert detrended.shape == levels.shape
+    assert zscored.shape == levels.shape
 
 
 def test_fit_405_to_465_accepts_single_channel_sessions() -> None:

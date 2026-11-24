@@ -219,3 +219,8 @@ __marimo__/
 
 # Ignore .pkl data files
 *.pkl
+
+# Example notebook outputs
+examples/generated/
+
+.DS_Store
