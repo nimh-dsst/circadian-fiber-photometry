@@ -349,6 +349,24 @@ These pickle files require the `tdt-export` extra when written or loaded.
 must not be normalized with `dict(block)` or accessed through inherited
 `dict.get`. As with all pickle files, load blocks only from trusted sources.
 
+### Combined mPFC loom-conditioning example
+
+`examples/generate_chronoxiv_mpfc_loom_dataset.py` creates eight single-site
+medial prefrontal cortex subjects with one 20-minute session per subject. Each
+session has a five-minute baseline and ten random, non-overlapping 30-second
+`loom` bouts during the remaining 15 minutes. The probability of a calcium
+transient beginning one second before loom onset decreases after every
+exposure. The script writes matching simulated TDT blocks, raw behavior CSVs,
+and a response-probability ground-truth table:
+
+```bash
+uv run python examples/generate_chronoxiv_mpfc_loom_dataset.py
+```
+
+Pass `--overwrite` to replace its existing output tree. The raw behavior CSVs
+are stored separately from the TDT block folders so they can be selected in
+ChronoXIV's Behavior Upload workflow.
+
 ### Photobleaching
 
 Photobleaching is configured independently for the 405 nm isosbestic and
